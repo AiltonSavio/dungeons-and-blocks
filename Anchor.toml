@@ -6,8 +6,7 @@ skip-lint = false
 
 [programs.localnet]
 dungeons_and_blocks = "EgnVbCLMmHm9tR6sqJPTMGks6aGvEbCuBaNnGmhHx4Gc"
-movement = "8MDygAkeGGQfKB8QiDnKd3mk5uRgrEMd6efk4XdrdVXL"
-position = "9vTYcetJxWb7xEkry3ukmGkbTyrumU7UYUehs7xZBKfV"
+hero-core = "7bguoQnx61Fa3XUYAAMgapejbL2MEB4Hgo1ZuQHypJGQ"
 
 [registry]
 url = "https://api.apr.dev"
@@ -17,7 +16,7 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [workspace]
-members = ["programs/*", "programs-ecs/components/*", "programs-ecs/systems/*"]
+members = ["programs/*"]
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
