@@ -1,0 +1,175 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Phaser Dungeon Prototype</title>
+    <style>
+      /* prevent scrollbar feedback loops */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #0e0f12;
+        color: #e7e7ea;
+        font-family: ui-sans-serif, system-ui;
+      }
+
+      /* Full-viewport app. The game area flexes to fill leftover space,
+         inventory sits below with natural height. We set explicit size on
+         #game-root from JS to snap to world pixels. */
+      #app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        gap: 0;
+      }
+
+      /* Phaser canvas is sized to this via RESIZE; we give it explicit W/H */
+      #game-root {
+        flex: 0 0 auto;
+        min-height: 0;
+        width: 100%;
+        position: relative;
+        margin: 0 auto; /* keep centered when we snap down */
+      }
+
+      canvas {
+        display: block;
+        image-rendering: pixelated;
+      }
+
+      /* Inventory bar stays visible without causing scrollbars */
+      #inventory {
+        padding: 10px 12px;
+        background: #14161c;
+        border-top: 1px solid #232730;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      #inventory .group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      #lightBarOuter {
+        width: 220px;
+        height: 10px;
+        background: #0b0c10;
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid #232730;
+      }
+      #lightBarInner {
+        height: 100%;
+        width: 100%;
+        background: #f5d259;
+      }
+      button {
+        background: #2a2f3a;
+        color: #e7e7ea;
+        border: 1px solid #3a4050;
+        padding: 6px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Phaser mounts here and will auto-resize to fill this area -->
+      <div id="game-root"></div>
+
+      <!-- Inventory bar (no scrolling; page is overflow:hidden) -->
+      <div id="inventory">
+        <div class="group">
+          <strong>Light</strong>
+          <div id="lightBarOuter"><div id="lightBarInner"></div></div>
+          <span id="lightPct" class="mono">100%</span>
+        </div>
+        <div class="group">
+          <strong>Torches:</strong> <span id="torchCount" class="mono">4</span>
+          <button id="btnUseTorch" title="Use torch (E)">Use Torch +25</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const TILE = 16;
+
+        function getCameraZoom() {
+          // Prefer the value the scene writes; fallback to 8 if not ready yet.
+          const z = window.__CAMERA_ZOOM__;
+          return typeof z === "number" && z > 0 ? z : 8;
+        }
+
+        function worldPixel() {
+          return TILE * getCameraZoom(); // e.g. 16 * 8 = 128
+        }
+
+        function snapGameRoot() {
+          const root = document.getElementById("game-root");
+          const inv = document.getElementById("inventory");
+          if (!root) return;
+
+          const vpw = Math.floor(window.innerWidth);
+          const vph = Math.floor(window.innerHeight);
+          const invH = inv ? inv.offsetHeight : 0;
+
+          const usableW = Math.max(0, vpw);
+          const usableH = Math.max(0, vph - invH);
+
+          const PIX = worldPixel();
+
+          // Snap down to nearest multiple of PIX on BOTH axes
+          const snappedW = Math.max(PIX, Math.floor(usableW / PIX) * PIX);
+          const snappedH = Math.max(PIX, Math.floor(usableH / PIX) * PIX);
+
+          root.style.width = snappedW + "px";
+          root.style.height = snappedH + "px";
+        }
+
+        // Re-run snapping if the scene later changes zoom
+        const zoomObserver = new MutationObserver(snapGameRoot);
+        zoomObserver.observe(document.documentElement, {
+          attributes: true,
+          subtree: true,
+        });
+
+        window.addEventListener("resize", snapGameRoot);
+        window.addEventListener("orientationchange", snapGameRoot);
+        window.addEventListener("load", () => {
+          snapGameRoot();
+          // run again shortly after load in case fonts/UI reflow changes inventory height
+          setTimeout(snapGameRoot, 50);
+        });
+
+        document.addEventListener("readystatechange", snapGameRoot);
+
+        // Poll a bit during boot while __CAMERA_ZOOM__ becomes available
+        let tries = 0;
+        const t = setInterval(() => {
+          tries++;
+          snapGameRoot();
+          if (tries > 20) clearInterval(t);
+        }, 100);
+      })();
+    </script>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
