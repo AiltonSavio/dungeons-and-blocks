@@ -34,14 +34,86 @@ export const DEFAULT_ELEMENTAL_PROFILE: ElementalProfile = {
 };
 
 export const HERO_BASE_CORE_STATS: Record<HeroClass, HeroCoreStats> = {
-  Archer:   { hpMax: 34, atk: 12, def: 6, mag: 6, res: 6, spd: 12, lck: 10, sta: 9 },
-  "Armored Axeman": { hpMax: 46, atk: 15, def: 10, mag: 4, res: 8, spd: 8, lck: 6, sta: 11 },
-  Knight:  { hpMax: 42, atk: 13, def: 12, mag: 5, res: 9, spd: 7, lck: 7, sta: 12 },
-  "Knight Templar": { hpMax: 40, atk: 12, def: 11, mag: 8, res: 11, spd: 7, lck: 6, sta: 11 },
-  Priest:  { hpMax: 32, atk: 7, def: 6, mag: 15, res: 14, spd: 8, lck: 9, sta: 8 },
-  Soldier: { hpMax: 44, atk: 14, def: 10, mag: 5, res: 7, spd: 9, lck: 6, sta: 11 },
-  Swordsman: { hpMax: 36, atk: 13, def: 8, mag: 6, res: 7, spd: 11, lck: 9, sta: 10 },
-  Wizard: { hpMax: 28, atk: 6, def: 5, mag: 17, res: 12, spd: 9, lck: 10, sta: 7 },
+  Archer: {
+    hpMax: 34,
+    atk: 12,
+    def: 6,
+    mag: 6,
+    res: 6,
+    spd: 12,
+    lck: 10,
+    sta: 9,
+  },
+  "Armored Axeman": {
+    hpMax: 46,
+    atk: 15,
+    def: 10,
+    mag: 4,
+    res: 8,
+    spd: 8,
+    lck: 6,
+    sta: 11,
+  },
+  Knight: {
+    hpMax: 42,
+    atk: 13,
+    def: 12,
+    mag: 5,
+    res: 9,
+    spd: 7,
+    lck: 7,
+    sta: 12,
+  },
+  "Knight Templar": {
+    hpMax: 40,
+    atk: 12,
+    def: 11,
+    mag: 8,
+    res: 11,
+    spd: 7,
+    lck: 6,
+    sta: 11,
+  },
+  Priest: {
+    hpMax: 32,
+    atk: 7,
+    def: 6,
+    mag: 15,
+    res: 14,
+    spd: 8,
+    lck: 9,
+    sta: 8,
+  },
+  Soldier: {
+    hpMax: 44,
+    atk: 14,
+    def: 10,
+    mag: 5,
+    res: 7,
+    spd: 9,
+    lck: 6,
+    sta: 11,
+  },
+  Swordsman: {
+    hpMax: 36,
+    atk: 13,
+    def: 8,
+    mag: 6,
+    res: 7,
+    spd: 11,
+    lck: 9,
+    sta: 10,
+  },
+  Wizard: {
+    hpMax: 28,
+    atk: 6,
+    def: 5,
+    mag: 17,
+    res: 12,
+    spd: 9,
+    lck: 10,
+    sta: 7,
+  },
 };
 
 export const HERO_ELEMENTAL_PROFILES: Record<HeroClass, ElementalProfile> = {
@@ -79,7 +151,10 @@ export const HERO_ELEMENTAL_PROFILES: Record<HeroClass, ElementalProfile> = {
   },
 };
 
-export const STATUS_EFFECT_LIBRARY: Record<StatusEffectId, StatusEffectDefinition> = {
+export const STATUS_EFFECT_LIBRARY: Record<
+  StatusEffectId,
+  StatusEffectDefinition
+> = {
   bleeding: {
     id: "bleeding",
     name: "Bleeding",
@@ -146,7 +221,10 @@ export const STATUS_EFFECT_LIBRARY: Record<StatusEffectId, StatusEffectDefinitio
   },
 };
 
-const STATUS_EFFECT_DERIVED_MODIFIERS: Record<StatusEffectId, Partial<Record<HeroStatKey, number>>> = {
+const STATUS_EFFECT_DERIVED_MODIFIERS: Record<
+  StatusEffectId,
+  Partial<Record<HeroStatKey, number>>
+> = {
   bleeding: { dodge: -4 },
   poison: { dodge: -2, debuffResist: -5 },
   stun: { accuracy: -20, initiative: -100 },
@@ -206,7 +284,9 @@ const applyModifier = (
 
 const mapTorch = (torchPercent: number) => {
   const pct = clamp(torchPercent, 0, 100);
-  const band = TORCH_BANDS.find((entry) => pct >= entry.min) ?? TORCH_BANDS[TORCH_BANDS.length - 1];
+  const band =
+    TORCH_BANDS.find((entry) => pct >= entry.min) ??
+    TORCH_BANDS[TORCH_BANDS.length - 1];
   return band;
 };
 
@@ -230,7 +310,11 @@ const applyTraitModifiers = (
   hero: Hero,
   torchPercent?: number
 ): HeroDerivedStats => {
-  const stats: Mutable<HeroDerivedStats> = { ...baseStats, physicalDamage: { ...baseStats.physicalDamage }, magicDamage: { ...baseStats.magicDamage } };
+  const stats: Mutable<HeroDerivedStats> = {
+    ...baseStats,
+    physicalDamage: { ...baseStats.physicalDamage },
+    magicDamage: { ...baseStats.magicDamage },
+  };
 
   const evaluator = (modifier: TraitModifier): boolean => {
     if (!modifier.condition) return true;
@@ -256,7 +340,10 @@ const applyTraitModifiers = (
   const apply = (trait: HeroTrait) => {
     trait.modifiers?.forEach((modifier) => {
       if (!evaluator(modifier)) return;
-      if ("physicalDamage" === modifier.stat || "magicDamage" === modifier.stat) {
+      if (
+        "physicalDamage" === modifier.stat ||
+        "magicDamage" === modifier.stat
+      ) {
         applyModifier(stats, modifier.stat, modifier.value);
         return;
       }
@@ -277,7 +364,8 @@ const applyTraitModifiers = (
         const current = (stats as Record<string, unknown>)[modifier.stat];
         if (typeof current === "number") {
           if (typeof current === "number") {
-            (stats as Mutable<HeroDerivedStats>)[modifier.stat] = current * modifier.value;
+            (stats as Mutable<HeroDerivedStats>)[modifier.stat] =
+              current * modifier.value;
           }
         }
       } else {
@@ -295,7 +383,11 @@ const applyStatusEffects = (
   stats: HeroDerivedStats
 ): HeroDerivedStats => {
   if (!statuses.effects.length) return stats;
-  const next: Mutable<HeroDerivedStats> = { ...stats, physicalDamage: { ...stats.physicalDamage }, magicDamage: { ...stats.magicDamage } };
+  const next: Mutable<HeroDerivedStats> = {
+    ...stats,
+    physicalDamage: { ...stats.physicalDamage },
+    magicDamage: { ...stats.magicDamage },
+  };
 
   statuses.effects.forEach((effect) => {
     const modifier = STATUS_EFFECT_DERIVED_MODIFIERS[effect.id];
@@ -332,9 +424,25 @@ const deriveBaseStats = (hero: Hero): HeroDerivedStats => {
   const magicMax = Math.round(coreStats.mag * 1.2 + hero.level * 1.4);
 
   return {
-    accuracy: clamp(70 + coreStats.spd * 1.5 + coreStats.lck - armorPenalty * 2 - stressPenalty, 0, 110),
+    accuracy: clamp(
+      70 +
+        coreStats.spd * 1.5 +
+        coreStats.lck -
+        armorPenalty * 2 -
+        stressPenalty,
+      0,
+      110
+    ),
     critChance: clamp(5 + coreStats.lck * 0.5 + hero.weaponLevel, 0, 100),
-    dodge: clamp(10 + coreStats.spd * 1.2 + coreStats.lck * 0.2 - armorPenalty * 3 - stressPenalty * 0.5, -20, 90),
+    dodge: clamp(
+      10 +
+        coreStats.spd * 1.2 +
+        coreStats.lck * 0.2 -
+        armorPenalty * 3 -
+        stressPenalty * 0.5,
+      -20,
+      90
+    ),
     physicalDamage: {
       min: physicalMin,
       max: Math.max(physicalMin, physicalMax),
@@ -344,8 +452,14 @@ const deriveBaseStats = (hero: Hero): HeroDerivedStats => {
       max: Math.max(magicMin, magicMax),
     },
     armorPen: clamp(coreStats.atk * 0.4 + hero.weaponLevel * 2, 0, 100),
-    initiative: Math.round(coreStats.spd * 2 + coreStats.lck + hero.level * 1.5),
-    debuffResist: clamp(20 + coreStats.res * 2 + coreStats.lck - stressPenalty, 0, 100),
+    initiative: Math.round(
+      coreStats.spd * 2 + coreStats.lck + hero.level * 1.5
+    ),
+    debuffResist: clamp(
+      20 + coreStats.res * 2 + coreStats.lck - stressPenalty,
+      0,
+      100
+    ),
   };
 };
 
@@ -356,7 +470,12 @@ export const computeDerivedStats = (
   const base = deriveBaseStats(hero);
   const withStatuses = applyStatusEffects(hero.statuses, base);
   const allTraits: HeroTrait[] = [...hero.traits, ...hero.diseases];
-  const withTraits = applyTraitModifiers(allTraits, withStatuses, hero, options.torchPercent);
+  const withTraits = applyTraitModifiers(
+    allTraits,
+    withStatuses,
+    hero,
+    options.torchPercent
+  );
   const torchAdjusted =
     options.torchPercent === undefined
       ? withTraits

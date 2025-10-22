@@ -25,4 +25,3 @@ export const BUTTON_DIMENSIONS = {
 export function snap(value: number) {
   return Math.round(value);
 }
-

@@ -177,12 +177,7 @@ export function renderBuildings({
       .setInteractive({ cursor: "pointer" })
       .on("pointerover", () => {
         base.setFillStyle(0x2d3546);
-        tooltip.show(
-          def.label,
-          def.caption,
-          x + BUILDING_WIDTH / 2,
-          y - 20
-        );
+        tooltip.show(def.label, def.caption, x + BUILDING_WIDTH / 2, y - 20);
       })
       .on("pointerout", () => {
         base.setFillStyle(0x262c3b);

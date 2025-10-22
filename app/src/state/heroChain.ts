@@ -8,9 +8,7 @@ import {
 import { Buffer } from "buffer";
 import heroIdl from "../../../target/idl/hero_core.json";
 
-export const HERO_CORE_PROGRAM_ID = new PublicKey(
-  heroIdl.address
-);
+export const HERO_CORE_PROGRAM_ID = new PublicKey(heroIdl.address);
 
 const PLAYER_PROFILE_SEED = Buffer.from("player");
 const HERO_SEED = Buffer.from("hero");
@@ -126,9 +124,9 @@ export function getExperienceRequirementForLevel(level: number): number | null {
   return EXPERIENCE_THRESHOLDS[level];
 }
 
-export function getNextLevelRequirement(hero: ChainHero):
-  | { targetLevel: number; requiredExperience: number }
-  | null {
+export function getNextLevelRequirement(
+  hero: ChainHero
+): { targetLevel: number; requiredExperience: number } | null {
   const targetLevel = hero.level + 1;
   const requirement = getExperienceRequirementForLevel(targetLevel);
   if (requirement === null) {

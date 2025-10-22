@@ -118,7 +118,7 @@ export default class Combat extends Phaser.Scene {
     // Pull sides further apart & spread rows more
     const leftX = W * 0.26;
     const rightX = W * 0.74;
-    const rowDY = 150; 
+    const rowDY = 150;
     const rowDX = 45;
 
     // front row are indexes 0 and 1, back row 2 and 3
@@ -174,8 +174,8 @@ export default class Combat extends Phaser.Scene {
       .setDepth(50);
 
     this.hud = new CombatHud(this);
-   this.hud.initialize(this.battlers);
-   this.hud.refreshHeroHud();
+    this.hud.initialize(this.battlers);
+    this.hud.refreshHeroHud();
 
     this.hud.renderTurnOrder(this.computeOrder(), 0);
     this.time.delayedCall(150, () => this.nextTurn());
@@ -832,10 +832,7 @@ export default class Combat extends Phaser.Scene {
   private endCombat(winner: Side) {
     const W = this.scale.width,
       H = this.scale.height;
-    this.add
-      .rectangle(0, 0, W, H, 0x000000, 0.6)
-      .setOrigin(0)
-      .setDepth(1000);
+    this.add.rectangle(0, 0, W, H, 0x000000, 0.6).setOrigin(0).setDepth(1000);
     this.add
       .text(W / 2, H / 2, winner === "heroes" ? "Victory!" : "Defeat...", {
         fontFamily: "ui-sans-serif, system-ui",

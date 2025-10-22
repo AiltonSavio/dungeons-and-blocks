@@ -15,7 +15,11 @@ export class StressPanel {
     }
   > = new Map();
 
-  constructor(scene: Phaser.Scene, run: RunState, parentLayer?: Phaser.GameObjects.Layer) {
+  constructor(
+    scene: Phaser.Scene,
+    run: RunState,
+    parentLayer?: Phaser.GameObjects.Layer
+  ) {
     this.scene = scene;
     this.run = run;
     this.container = scene.add.container(20, 80).setDepth(1600);

@@ -1,4 +1,9 @@
-import { resolveItem, type InventoryItem, type InventorySlot, type ItemId } from "./items";
+import {
+  resolveItem,
+  type InventoryItem,
+  type InventorySlot,
+  type ItemId,
+} from "./items";
 
 export type InventorySnapshot = {
   slots: InventorySlot[];
@@ -82,7 +87,9 @@ export class Inventory {
     while (remaining > 0) {
       const target = this.slots.findIndex((s) => s === null);
       if (target === -1) return false;
-      const transfer = stackable ? Math.min(def.maxStack ?? remaining, remaining) : 1;
+      const transfer = stackable
+        ? Math.min(def.maxStack ?? remaining, remaining)
+        : 1;
       this.slots[target] = {
         def,
         quantity: transfer,

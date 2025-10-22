@@ -139,7 +139,12 @@ export default class Game extends Phaser.Scene {
   private chests: Chest[] = [];
   private portals: Portal[] = [];
   private inChestInteraction = false;
-  private minimapMarkers: { x: number; y: number; shape: "circle" | "cross"; color: number }[] = [];
+  private minimapMarkers: {
+    x: number;
+    y: number;
+    shape: "circle" | "cross";
+    color: number;
+  }[] = [];
   private awaitingPortalDecision = false;
   private portalPrompt?: Phaser.GameObjects.Container;
   private portalOverlay?: Phaser.GameObjects.Rectangle;
@@ -235,7 +240,9 @@ export default class Game extends Phaser.Scene {
     const heroKeys = this.partyHeroes
       .map((hero) => HERO_CLASS_TO_KEY[hero.cls])
       .filter((key): key is HeroClassKey => Boolean(key));
-    this.partyKeys = heroKeys.length ? heroKeys.slice(0, 4) : PARTY_ORDER.slice();
+    this.partyKeys = heroKeys.length
+      ? heroKeys.slice(0, 4)
+      : PARTY_ORDER.slice();
     this.partyLength = this.partyKeys.length;
 
     this.runKey = this.makeRunKey();
@@ -257,7 +264,7 @@ export default class Game extends Phaser.Scene {
 
     // --- Simple tiles (walls / floors) ---
     this.load.image("floor_clean_tile", "assets/tiles/floor_clean_tile.png");
-   this.load.image("floor_below_wall", "assets/tiles/floor_below_wall.png");
+    this.load.image("floor_below_wall", "assets/tiles/floor_below_wall.png");
     this.load.image("wall_fill_dirt", "assets/tiles/wall_fill_dirt.png");
 
     // Loot chest frames
@@ -269,7 +276,9 @@ export default class Game extends Phaser.Scene {
 
   async create(): Promise<void> {
     setInventoryVisible(true);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => setInventoryVisible(false));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () =>
+      setInventoryVisible(false)
+    );
     this.releaseKeyboardBindings();
 
     // Reset run-scoped state when the scene restarts.
@@ -466,7 +475,12 @@ export default class Game extends Phaser.Scene {
     const uiH = this.uiCam?.height ?? this.scale.height;
     this.minimap.updateViewport(uiW, uiH);
 
-    if (this.awaitingEncounterDecision || this.awaitingPortalDecision || this.inChestInteraction || this.lootModal) {
+    if (
+      this.awaitingEncounterDecision ||
+      this.awaitingPortalDecision ||
+      this.inChestInteraction ||
+      this.lootModal
+    ) {
       this.checkChestProximity(true);
       this.applyMinimapMarkers();
       return;
@@ -780,8 +794,7 @@ export default class Game extends Phaser.Scene {
     const height = Math.max(3, this.gh);
     const grid: Grid = Array.from({ length: height }, (_, y) =>
       Array.from({ length: width }, (_, x) => {
-        const edge =
-          x === 0 || y === 0 || x === width - 1 || y === height - 1;
+        const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
         return edge ? Tile.Wall : Tile.Floor;
       })
     );
@@ -812,7 +825,10 @@ export default class Game extends Phaser.Scene {
     };
   }
 
-  private findReentryTile(portal: { x: number; y: number }): { x: number; y: number } {
+  private findReentryTile(portal: { x: number; y: number }): {
+    x: number;
+    y: number;
+  } {
     const order = [
       { x: portal.x + 1, y: portal.y },
       { x: portal.x - 1, y: portal.y },
@@ -1168,7 +1184,8 @@ export default class Game extends Phaser.Scene {
       if (this.declinedPortals.has(key)) continue;
       const cx = portal.tileX * this.tileSize + this.tileSize / 2;
       const cy = portal.tileY * this.tileSize + this.tileSize / 2;
-      const distSq = (leader.x - cx) * (leader.x - cx) + (leader.y - cy) * (leader.y - cy);
+      const distSq =
+        (leader.x - cx) * (leader.x - cx) + (leader.y - cy) * (leader.y - cy);
       if (distSq <= threshold) {
         this.showPortalPrompt(portal);
         break;
@@ -1207,7 +1224,7 @@ export default class Game extends Phaser.Scene {
       const dx = leader.x - chest.sprite.x;
       const dy = leader.y - chest.sprite.y;
       const distSq = dx * dx + dy * dy;
-      if (distSq <= (this.tileSize * this.tileSize) * 1.2) {
+      if (distSq <= this.tileSize * this.tileSize * 1.2) {
         if (!skipOpen) this.openChest(chest);
       }
     });
@@ -1245,7 +1262,10 @@ export default class Game extends Phaser.Scene {
     ];
     const bonusCount = Phaser.Math.Between(1, 3);
     for (let i = 0; i < bonusCount; i++) {
-      loot.items.push({ id: Phaser.Utils.Array.GetRandom(extras), quantity: 1 });
+      loot.items.push({
+        id: Phaser.Utils.Array.GetRandom(extras),
+        quantity: 1,
+      });
     }
     return loot;
   }
@@ -1268,7 +1288,9 @@ export default class Game extends Phaser.Scene {
 
     const panelWidth = Math.min(460, width * 0.85);
     const panelHeight = 220;
-    this.portalPrompt = this.add.container(width / 2, height / 2).setDepth(1860);
+    this.portalPrompt = this.add
+      .container(width / 2, height / 2)
+      .setDepth(1860);
     this.uiLayer.add(this.portalPrompt);
 
     const bg = this.add

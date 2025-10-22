@@ -2,21 +2,10 @@
 
 ## Project Structure & Module Organization
 
-- `programs/` contains the Anchor on-chain crates (`dungeons-and-blocks`, `hero-core`); shared Solana types belong in `src/lib.rs` for each program.
+- `programs/` contains the Anchor on-chain crates (`dungeon-nft`, `hero-core`); shared Solana types belong in `src/lib.rs` for each program.
 - `app/` is the Phaser client built with Vite; UI utilities live under `app/src/ui`, state managers in `app/src/state`, and scenes in `app/src/scenes`.
 - `migrations/deploy.ts` wires Anchor deployments; extend this when adding programs or accounts.
 - `docs/` hosts gameplay and integration notes, and `tests/fixtures/` provides local validator snapshots referenced by `Anchor.toml`. The full documentation for magicblock is in `docs/magicblock/`.
-
-## Build, Test, and Development Commands
-
-```bash
-yarn app:dev        # run Vite + Phaser locally
-yarn app:build      # type-check and emit static assets to app/dist
-anchor build        # compile all programs in programs/
-anchor test         # spin up the configured localnet and run ts-mocha tests
-```
-
-Use `yarn lint` / `yarn lint:fix` before submitting UI changes.
 
 ## Coding Style & Naming Conventions
 
@@ -24,6 +13,7 @@ Use `yarn lint` / `yarn lint:fix` before submitting UI changes.
 - Component-style modules export defaults when consumed by Phaser scenes; helper utilities export named functions.
 - Rust programs follow standard Rustfmt defaults (4-space indents); run `cargo fmt` inside each program directory.
 - Keep on-chain account structs and instruction handlers colocated; mint new modules rather than large `lib.rs` blocks to preserve clarity.
+- Dungeon data rendered in the Phaser app must come from chain accounts where possible. The game scene hydrates the `grid`, `rooms`, and `edges` from the fetched `DungeonMint` and derives doors, chests, and portals deterministically—avoid introducing new client-side generators that diverge from the on-chain layout.
 
 ## Testing Guidelines
 

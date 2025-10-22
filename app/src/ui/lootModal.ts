@@ -18,7 +18,11 @@ export class LootModal {
   private textGroup: Phaser.GameObjects.Container | null = null;
   private opened = false;
 
-  constructor(scene: Phaser.Scene, rewards: LootReward, callbacks: LootModalCallbacks) {
+  constructor(
+    scene: Phaser.Scene,
+    rewards: LootReward,
+    callbacks: LootModalCallbacks
+  ) {
     this.scene = scene;
     this.rewards = rewards;
     this.callbacks = callbacks;
@@ -32,7 +36,9 @@ export class LootModal {
       .setDepth(2500)
       .setInteractive();
 
-    this.container = this.scene.add.container(width / 2, height / 2).setDepth(2510);
+    this.container = this.scene.add
+      .container(width / 2, height / 2)
+      .setDepth(2510);
 
     const panel = this.scene.add
       .rectangle(0, 20, 420, 360, 0x0f1119, 0.95)
@@ -46,16 +52,22 @@ export class LootModal {
       .setScale(2.2);
     this.container.add(this.chest);
 
-    this.scene.time.delayedCall(200, () => this.chest?.setTexture("loot_chest_02"));
-    this.scene.time.delayedCall(400, () => this.chest?.setTexture("loot_chest_03"));
+    this.scene.time.delayedCall(200, () =>
+      this.chest?.setTexture("loot_chest_02")
+    );
+    this.scene.time.delayedCall(400, () =>
+      this.chest?.setTexture("loot_chest_03")
+    );
     this.scene.time.delayedCall(600, () => {
       this.spawnLootList();
       this.opened = true;
     });
 
-    this.scene.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC).once("down", () => {
-      this.close();
-    });
+    this.scene.input.keyboard
+      ?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
+      .once("down", () => {
+        this.close();
+      });
   }
 
   destroy() {

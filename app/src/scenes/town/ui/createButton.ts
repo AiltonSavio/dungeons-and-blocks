@@ -1,10 +1,6 @@
 import Phaser from "phaser";
 
-import {
-  BUTTON_DIMENSIONS,
-  PANEL_COLORS,
-  UI_FONT,
-} from "../../../ui/uiConfig";
+import { BUTTON_DIMENSIONS, PANEL_COLORS, UI_FONT } from "../../../ui/uiConfig";
 
 export function createButton(
   scene: Phaser.Scene,
