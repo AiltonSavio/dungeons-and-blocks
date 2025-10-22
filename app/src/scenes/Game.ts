@@ -1,5 +1,10 @@
 import Phaser from "phaser";
-import { generateDungeon } from "../dungeon/generate";
+import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
+import {
+  deriveDoorTilesFromRooms,
+  generateChestTiles,
+  generatePortalTiles,
+} from "../dungeon/generate";
 import {
   ENEMY_ASSETS,
   HERO_ANIM_KEYS,
@@ -32,6 +37,7 @@ import type { LootReward } from "../state/loot";
 import type { CombatResolution } from "../state/combatEvents";
 import type { ItemId } from "../state/items";
 import type { HeroClass } from "../state/models";
+import { ChainDungeon, fetchDungeonByAddress } from "../state/dungeonChain";
 import { setInventoryVisible } from "../ui/hudControls";
 
 type Chest = {
@@ -63,11 +69,16 @@ type PartyHeroSnapshot = {
   name: string;
 };
 
+type DungeonLaunchPayload = {
+  source?: string;
+  dungeon: ChainDungeon;
+};
+
 type GameLaunchData = {
   seed?: number;
   heroes?: PartyHeroSnapshot[];
   supplies?: Partial<Record<ItemId, number>>;
-  dungeon?: unknown;
+  dungeon?: DungeonLaunchPayload;
 };
 
 type SavedRunRecord = {
@@ -138,7 +149,12 @@ export default class Game extends Phaser.Scene {
   private savedRun?: SavedRunRecord;
 
   private dungeonSeed = 1337;
+  private launchDungeonPayload?: DungeonLaunchPayload;
+  private onChainDungeon?: ChainDungeon;
+  private dungeonFetchPromise?: Promise<ChainDungeon | null>;
+  private solanaConnection?: Connection;
   private launchData?: GameLaunchData;
+  private sceneReady = false;
 
   // ---------- Layers & UI camera ----------
   private worldLayer!: Phaser.GameObjects.Layer;
@@ -170,10 +186,11 @@ export default class Game extends Phaser.Scene {
   }
 
   init(data?: GameLaunchData) {
-    this.dungeonSeed = 1337;
     this.partyHeroes = [];
-    if (data) {
+    if (data && data.seed) {
+      this.dungeonSeed = data.seed;
       this.launchData = data;
+      this.launchDungeonPayload = data.dungeon;
       const maybeSeed = (data as GameLaunchData & { seed?: unknown }).seed;
       if (typeof maybeSeed === "number" && Number.isFinite(maybeSeed)) {
         this.dungeonSeed = Math.floor(maybeSeed);
@@ -185,6 +202,31 @@ export default class Game extends Phaser.Scene {
       }
       if (Array.isArray(data.heroes)) {
         this.partyHeroes = data.heroes.map((hero) => ({ ...hero }));
+      }
+      const dungeonPayload = data.dungeon;
+      const providedDungeon = dungeonPayload?.dungeon;
+      if (providedDungeon) {
+        this.onChainDungeon = providedDungeon;
+        try {
+          const publicKey = new PublicKey(providedDungeon.publicKey);
+          const connection = this.getSolanaConnection();
+          if (connection) {
+            this.dungeonFetchPromise = fetchDungeonByAddress(
+              connection,
+              publicKey
+            )
+              .then((account) => account ?? providedDungeon)
+              .catch((err) => {
+                console.error("Failed to fetch dungeon account:", err);
+                return providedDungeon;
+              });
+          } else {
+            this.dungeonFetchPromise = Promise.resolve(providedDungeon);
+          }
+        } catch (err) {
+          console.error("Invalid dungeon public key", err);
+          this.dungeonFetchPromise = Promise.resolve(providedDungeon);
+        }
       }
     } else {
       this.launchData = undefined;
@@ -225,12 +267,13 @@ export default class Game extends Phaser.Scene {
     this.load.image("portal_tile", "assets/tiles/portal.png");
   }
 
-  create(): void {
+  async create(): Promise<void> {
     setInventoryVisible(true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => setInventoryVisible(false));
     this.releaseKeyboardBindings();
 
     // Reset run-scoped state when the scene restarts.
+    this.sceneReady = false;
     this.party = [];
     this.trail = [];
     this.minimapMarkers = [];
@@ -246,16 +289,12 @@ export default class Game extends Phaser.Scene {
     this.partyLength = this.partyKeys.length;
 
     // 1) Dungeon
-    const gen = generateDungeon(this.gw, this.gh, this.dungeonSeed) as Dungeon | Grid;
-    if (Array.isArray(gen)) {
-      // legacy: generator returned Grid only
-      this.dun = { grid: gen, rooms: [], edges: [], doorTiles: [] };
+    const resolvedDungeon = await this.resolveDungeonAccount();
+    if (resolvedDungeon) {
+      this.onChainDungeon = resolvedDungeon;
+      this.applyDungeonAccount(resolvedDungeon);
     } else {
-      this.dun = gen as Dungeon;
-      this.dun.rooms = this.dun.rooms ?? [];
-      this.dun.edges = this.dun.edges ?? [];
-      this.dun.doorTiles = this.dun.doorTiles ?? [];
-      this.dun.portals = this.dun.portals ?? [];
+      this.buildFallbackDungeon();
     }
     this.grid = this.dun.grid;
     this.roomMeta = (this.dun.rooms ?? []).map(() => ({
@@ -416,9 +455,11 @@ export default class Game extends Phaser.Scene {
     this.game.events.on("combatEnd", (result: CombatResolution) => {
       this.handleCombatResolution(result);
     });
+    this.sceneReady = true;
   }
 
   update(_time: number, deltaMs: number): void {
+    if (!this.sceneReady) return;
     const dt = Math.min(deltaMs, 50) / 1000;
 
     const uiW = this.uiCam?.width ?? this.scale.width;
@@ -651,9 +692,14 @@ export default class Game extends Phaser.Scene {
   // ================= Utils =================
 
   private makeRunKey(): string {
-    const dungeon = this.launchData?.dungeon as { id?: string | number } | undefined;
-    if (dungeon && dungeon.id !== undefined && dungeon.id !== null) {
-      return `dungeon:${String(dungeon.id)}`;
+    const dungeon = this.launchDungeonPayload?.dungeon;
+    if (dungeon) {
+      if (dungeon.publicKey) {
+        return `dungeon:${dungeon.publicKey}`;
+      }
+      if (dungeon.mintId !== undefined && dungeon.mintId !== null) {
+        return `dungeon:${String(dungeon.mintId)}`;
+      }
     }
     return `seed:${this.dungeonSeed}`;
   }
@@ -663,6 +709,107 @@ export default class Game extends Phaser.Scene {
       for (let x = 0; x < this.gw; x++)
         if (this.grid[y][x] === Tile.Floor) return { x, y };
     return { x: 1, y: 1 };
+  }
+
+  private getSolanaConnection(): Connection | undefined {
+    if (typeof window === "undefined") return undefined;
+    if (!this.solanaConnection) {
+      const env =
+        (
+          import.meta as unknown as {
+            env?: Record<string, string | undefined>;
+          }
+        ).env ?? {};
+      const endpoint =
+        env.VITE_SOLANA_RPC_URL ??
+        (window as unknown as { __DNB_SOLANA_RPC__?: string })
+          .__DNB_SOLANA_RPC__ ??
+        clusterApiUrl("devnet");
+      this.solanaConnection = new Connection(endpoint, "confirmed");
+    }
+    return this.solanaConnection;
+  }
+
+  private async resolveDungeonAccount(): Promise<ChainDungeon | null> {
+    if (this.dungeonFetchPromise) {
+      try {
+        return await this.dungeonFetchPromise;
+      } catch (err) {
+        console.error("Failed to resolve dungeon account:", err);
+        return this.onChainDungeon ?? null;
+      }
+    }
+    return this.onChainDungeon ?? null;
+  }
+
+  private applyDungeonAccount(account: ChainDungeon) {
+    const width = Math.max(1, account.gridWidth);
+    const height = Math.max(1, account.gridHeight);
+    const tiles = account.grid;
+    const grid: number[][] = [];
+    for (let y = 0; y < height; y++) {
+      const row: number[] = [];
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        row.push(tiles[idx] ?? 1);
+      }
+      grid.push(row);
+    }
+
+    this.gw = width;
+    this.gh = height;
+    this.dungeonSeed = account.seed || this.dungeonSeed;
+    const rooms = [...(account.rooms ?? [])];
+    const edges = [...(account.edges ?? [])];
+    const doorTiles = deriveDoorTilesFromRooms(rooms, edges);
+    const chests = generateChestTiles(grid, this.dungeonSeed);
+    const portals = generatePortalTiles(grid, this.dungeonSeed, chests);
+
+    this.dun = {
+      grid,
+      rooms,
+      edges,
+      doorTiles,
+      chests,
+      portals,
+    };
+  }
+
+  private buildFallbackDungeon() {
+    const width = Math.max(3, this.gw);
+    const height = Math.max(3, this.gh);
+    const grid: Grid = Array.from({ length: height }, (_, y) =>
+      Array.from({ length: width }, (_, x) => {
+        const edge =
+          x === 0 || y === 0 || x === width - 1 || y === height - 1;
+        return edge ? Tile.Wall : Tile.Floor;
+      })
+    );
+
+    this.gw = width;
+    this.gh = height;
+
+    const rooms: Rect[] = [
+      {
+        x: 1,
+        y: 1,
+        w: Math.max(1, width - 2),
+        h: Math.max(1, height - 2),
+      },
+    ];
+    const edges: Edge[] = [];
+    const doorTiles = deriveDoorTilesFromRooms(rooms, edges);
+    const chests = generateChestTiles(grid, this.dungeonSeed);
+    const portals = generatePortalTiles(grid, this.dungeonSeed, chests);
+
+    this.dun = {
+      grid,
+      rooms,
+      edges,
+      doorTiles,
+      chests,
+      portals,
+    };
   }
 
   private findReentryTile(portal: { x: number; y: number }): { x: number; y: number } {

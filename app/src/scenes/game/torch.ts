@@ -1,12 +1,5 @@
 import Phaser from "phaser";
 
-type TorchHudElements = {
-  pct: HTMLElement | null;
-  count: HTMLElement | null;
-  bar: HTMLElement | null;
-  button: HTMLButtonElement | null;
-};
-
 type TorchOptions = {
   scene: Phaser.Scene;
   worldLayer: Phaser.GameObjects.Layer;
@@ -39,13 +32,6 @@ export class TorchSystem {
   private torchPercent = 100;
   private torchCount = 4;
   private distAccum = 0;
-
-  private hud: TorchHudElements = {
-    pct: null,
-    count: null,
-    bar: null,
-    button: null,
-  };
 
   constructor(options: TorchOptions) {
     this.scene = options.scene;
@@ -101,8 +87,6 @@ export class TorchSystem {
     this.colorGeoMask = this.colorStencil.createGeometryMask();
     this.colorOverlay.setMask(this.colorGeoMask);
 
-    this.bindHud();
-    this.updateHud();
     this.updateTorchVisual();
     this.updateColorMaskCircle(startX, startY);
   }
@@ -132,7 +116,6 @@ export class TorchSystem {
     this.torchPercent = Phaser.Math.Clamp(this.torchPercent + delta, 0, 100);
     if (this.torchPercent !== before) {
       this.updateTorchVisual();
-      this.updateHud();
     }
   }
 
@@ -146,37 +129,6 @@ export class TorchSystem {
 
   get count(): number {
     return this.torchCount;
-  }
-
-  private bindHud(): void {
-    this.hud.pct = document.getElementById("lightPct");
-    this.hud.count = document.getElementById("torchCount");
-    this.hud.bar = document.getElementById("lightBarInner");
-    this.hud.button = document.getElementById(
-      "btnUseTorch"
-    ) as HTMLButtonElement | null;
-    if (this.hud.button) {
-      this.hud.button.onclick = () => this.consumeTorch();
-    }
-  }
-
-  private updateHud(): void {
-    if (this.hud.pct) this.hud.pct.textContent = `${this.torchPercent}%`;
-    if (this.hud.count) this.hud.count.textContent = String(this.torchCount);
-    if (this.hud.bar) {
-      this.hud.bar.style.width = `${this.torchPercent}%`;
-      const color =
-        this.torchPercent > 50
-          ? "#f5d259"
-          : this.torchPercent > 25
-          ? "#f5a259"
-          : "#ff6b6b";
-      this.hud.bar.style.backgroundColor = color;
-    }
-    if (this.hud.button) {
-      this.hud.button.disabled =
-        this.torchCount <= 0 || this.torchPercent >= 100;
-    }
   }
 
   private updateTorchVisual(): void {

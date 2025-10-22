@@ -1,0 +1,10 @@
+pub const CONFIG_SEED: &[u8] = b"config";
+pub const DUNGEON_SEED: &[u8] = b"dungeon";
+pub const MAX_SUPPLY: u16 = 150;
+pub const MAX_ROOMS: usize = 40;
+pub const MAX_EDGES: usize = 40;
+pub const MAX_NAME_LEN: usize = 64;
+pub const MAX_SYMBOL_LEN: usize = 10;
+pub const MAX_URI_LEN: usize = 128;
+pub const MAX_METADATA_NAME_LEN: usize = MAX_NAME_LEN + 8;
+pub const MAX_METADATA_URI_LEN: usize = MAX_URI_LEN + 16;

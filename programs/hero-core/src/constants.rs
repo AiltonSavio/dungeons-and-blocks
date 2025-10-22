@@ -1,0 +1,11 @@
+pub const PLAYER_PROFILE_SEED: &[u8] = b"player";
+pub const HERO_SEED: &[u8] = b"hero";
+pub const GAME_VAULT_SEED: &[u8] = b"vault";
+pub const GOLD_ACCOUNT_SEED: &[u8] = b"gold";
+pub const MAX_HEROES_PER_PLAYER: u8 = 20;
+pub const MAX_FREE_HEROES: u8 = 4;
+pub const HERO_PRICE: u64 = 100;
+pub const MAX_STAT_VALUE: u8 = 100;
+pub const STATUS_EFFECTS_COUNT: u8 = 5;
+pub const MAX_LEVEL: u8 = 5;
+pub const EXPERIENCE_THRESHOLDS: [u64; (MAX_LEVEL as usize) + 1] = [0, 0, 100, 300, 600, 1000];

@@ -1,14 +1,19 @@
 import Phaser from "phaser";
+import {
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  clusterApiUrl,
+  LAMPORTS_PER_SOL,
+} from "@solana/web3.js";
 import { townStore } from "../state/townStore";
 import {
-  Hero,
   ItemDefinition,
   MARKET_ITEMS,
-  MAX_ACTIVE_SKILLS,
   MAX_HEROES,
   TownState,
 } from "../state/models";
-import { computeDerivedStats } from "../state/heroStats";
 import {
   SAFE_MARGIN,
   UI_FONT,
@@ -17,78 +22,67 @@ import {
   snap,
 } from "../ui/uiConfig";
 import { setInventoryVisible } from "../ui/hudControls";
+import {
+  ChainHero,
+  PlayerProfile,
+  HERO_FREE_MINT_LIMIT,
+  HERO_PAID_COST,
+  fetchHeroes,
+  fetchPlayerProfile,
+  getHeroTypeLabel,
+  getQuirkLabel,
+  createInitializePlayerInstruction,
+  createMintHeroInstruction,
+  canLevelUpHero,
+  createLevelUpInstruction,
+  getNextLevelRequirement,
+} from "../state/heroChain";
 
-type BuildingKey =
-  | "tavern"
-  | "sanitarium"
-  | "blacksmith"
-  | "guild"
-  | "market"
-  | "abbey";
-
-type BuildingDef = {
-  key: BuildingKey;
-  label: string;
-  caption: string;
-  col: number;
-  row: number;
-};
+import {
+  BuildingKey,
+  GOLD_PANEL_WIDTH,
+  WALLET_PANEL_HEIGHT,
+  WALLET_PANEL_WIDTH,
+} from "./town/constants";
+import { createButton } from "./town/ui/createButton";
+import {
+  createTopBar,
+  renderBackground,
+  renderBuildings,
+  renderEmbarkCTA,
+} from "./town/ui/layout";
+import { TooltipManager } from "./town/ui/TooltipManager";
+import { RosterPanel, RosterPanelState } from "./town/RosterPanel";
+import { formatHeroTimestamp } from "./town/heroFormatting";
 
 type ToastEntry = {
   container: Phaser.GameObjects.Container;
   ttl: number;
 };
 
-const ROSTER_WIDTH = 280;
-const BUILDING_WIDTH = 180;
-const BUILDING_HEIGHT = 120;
-const GRID_COLUMNS = 3;
-const GRID_ROWS = 2;
+type WalletPublicKey = {
+  toBase58(): string;
+  toString(): string;
+};
 
-const BUILDINGS: BuildingDef[] = [
-  {
-    key: "tavern",
-    label: "Tavern",
-    caption: "Recruit & rest heroes",
-    col: 0,
-    row: 0,
-  },
-  {
-    key: "sanitarium",
-    label: "Sanitarium",
-    caption: "Cure ailments & quirks",
-    col: 2,
-    row: 0,
-  },
-  {
-    key: "blacksmith",
-    label: "Blacksmith",
-    caption: "Forge weapons & armor",
-    col: 0,
-    row: 1,
-  },
-  {
-    key: "guild",
-    label: "Guild",
-    caption: "Train & equip skills",
-    col: 2,
-    row: 1,
-  },
-  {
-    key: "market",
-    label: "Market",
-    caption: "Buy & sell supplies",
-    col: 1,
-    row: 0,
-  },
-  {
-    key: "abbey",
-    label: "Abbey",
-    caption: "Ease stress & bless",
-    col: 1,
-    row: 1,
-  },
-];
+type SolanaEventHandler = (...args: unknown[]) => void;
+
+type SolanaProvider = {
+  isPhantom?: boolean;
+  publicKey?: WalletPublicKey | null;
+  connect(options?: {
+    onlyIfTrusted?: boolean;
+  }): Promise<{ publicKey: WalletPublicKey } | void>;
+  disconnect(): Promise<void>;
+  on?(event: string, handler: SolanaEventHandler): void;
+  off?(event: string, handler: SolanaEventHandler): void;
+  removeListener?(event: string, handler: SolanaEventHandler): void;
+  request?(args: { method: string; params?: unknown[] }): Promise<unknown>;
+  signAndSendTransaction?: (
+    tx: Transaction
+  ) => Promise<{ signature: string } | string>;
+  signTransaction?: (tx: Transaction) => Promise<Transaction>;
+};
 
 export class TownScene extends Phaser.Scene {
   private safe = SAFE_MARGIN;
@@ -100,30 +94,25 @@ export class TownScene extends Phaser.Scene {
   private tooltipLayer!: Phaser.GameObjects.Container;
   private toastLayer!: Phaser.GameObjects.Container;
 
-  private rosterPanel!: Phaser.GameObjects.Container;
-  private rosterMask!: Phaser.Display.Masks.GeometryMask;
-  private rosterList!: Phaser.GameObjects.Container;
-  private rosterScrollbar!: Phaser.GameObjects.Rectangle;
-  private rosterScroll = 0;
-  private rosterMaxScroll = 0;
-  private rosterVisibleHeight = 0;
-  private rosterHeader!: Phaser.GameObjects.Text;
-  private rosterDetail?: Phaser.GameObjects.Container;
-  private expandedHeroId?: string;
-  private rosterWheelHandler?: (
-    pointer: Phaser.Input.Pointer,
-    gameObjects: Phaser.GameObjects.GameObject[],
-    dx: number,
-    dy: number,
-    dz: number
-  ) => void;
-  private rosterHover = false;
-  private rosterDragging = false;
-  private rosterDragStartY = 0;
-  private rosterScrollStart = 0;
+  private rosterPanel!: RosterPanel;
+  private expandedHeroId?: number;
 
   private goldPanel!: Phaser.GameObjects.Container;
   private embarkedCTA!: Phaser.GameObjects.Container;
+
+  private walletPanel!: Phaser.GameObjects.Container;
+  private walletStatusText?: Phaser.GameObjects.Text;
+  private walletProvider?: SolanaProvider;
+  private walletAddress?: string;
+  private walletBusy = false;
+  private walletConnectHandler?: (publicKey: WalletPublicKey) => void;
+  private walletDisconnectHandler?: () => void;
+  private solanaConnection?: Connection;
+  private heroes: ChainHero[] = [];
+  private heroesLoading = false;
+  private heroLoadError?: string;
+  private playerProfile: PlayerProfile | null | undefined;
+  private programBusy = false;
 
   private plazaCenterX = 0;
   private plazaCenterY = 0;
@@ -133,7 +122,7 @@ export class TownScene extends Phaser.Scene {
   private modalPanel?: Phaser.GameObjects.Container;
   private pauseOverlay?: Phaser.GameObjects.Container;
 
-  private tooltip?: Phaser.GameObjects.Container;
+  private tooltipManager!: TooltipManager;
   private toasts: ToastEntry[] = [];
 
   private unsubChange?: () => void;
@@ -171,11 +160,56 @@ export class TownScene extends Phaser.Scene {
 
     this.releaseKeyboardBindings();
 
-    this.renderBackground();
-    this.renderBuildings();
-    this.renderTopBar();
-    this.renderRoster();
-    this.renderEmbarkCTA();
+    const background = renderBackground(this, this.safe, this.worldLayer);
+    this.plazaCenterX = background.centerX;
+    this.plazaCenterY = background.centerY;
+    this.plazaRadius = background.radius;
+
+    this.tooltipManager = new TooltipManager(
+      this,
+      this.tooltipLayer,
+      this.safe
+    );
+    renderBuildings({
+      scene: this,
+      safeMargin: this.safe,
+      worldLayer: this.worldLayer,
+      tooltip: this.tooltipManager,
+      onSelect: (key) => this.openBuilding(key),
+      bindHotkey: (event, handler) => this.bindKey(event, handler),
+    });
+
+    const topBar = createTopBar({
+      scene: this,
+      safeMargin: this.safe,
+      uiLayer: this.uiLayer,
+    });
+    this.walletPanel = topBar.walletPanel;
+    this.goldPanel = topBar.goldPanel;
+
+    this.rosterPanel = new RosterPanel({
+      scene: this,
+      safeMargin: this.safe,
+      uiLayer: this.uiLayer,
+      maxHeroes: MAX_HEROES,
+      onHeroToggle: (heroId) => {
+        this.expandedHeroId = heroId;
+        this.updateRosterPanel();
+      },
+    });
+    this.rosterPanel.init();
+
+    this.initWalletIntegration();
+
+    this.embarkedCTA = renderEmbarkCTA({
+      scene: this,
+      centerX: this.plazaCenterX,
+      centerY: this.plazaCenterY,
+      uiLayer: this.uiLayer,
+      createButton: (x, y, width, label, handler, enabled) =>
+        createButton(this, x, y, width, label, handler, enabled),
+      onEmbark: () => this.launchEmbark(),
+    });
 
     this.bindInputs();
 
@@ -189,19 +223,41 @@ export class TownScene extends Phaser.Scene {
       this.unsubChange?.();
       this.unsubToast?.();
       this.events.off(Phaser.Scenes.Events.RESUME, hideInventory);
-      if (this.rosterWheelHandler) {
-        this.input.off("wheel", this.rosterWheelHandler, this);
-        this.rosterWheelHandler = undefined;
-      }
-      this.input.off("pointermove", this.onRosterPointerMove, this);
-      this.input.off("pointerup", this.onRosterPointerUp, this);
-      this.input.off("pointerupoutside", this.onRosterPointerUp, this);
+      this.input.off(
+        "pointermove",
+        this.rosterPanel.handlePointerMove,
+        this.rosterPanel
+      );
+      this.input.off(
+        "pointerup",
+        this.rosterPanel.handlePointerUp,
+        this.rosterPanel
+      );
+      this.input.off(
+        "pointerupoutside",
+        this.rosterPanel.handlePointerUp,
+        this.rosterPanel
+      );
       this.releaseKeyboardBindings();
+      this.teardownWalletIntegration();
+      this.rosterPanel.destroy();
     });
 
-    this.input.on("pointermove", this.onRosterPointerMove, this);
-    this.input.on("pointerup", this.onRosterPointerUp, this);
-    this.input.on("pointerupoutside", this.onRosterPointerUp, this);
+    this.input.on(
+      "pointermove",
+      this.rosterPanel.handlePointerMove,
+      this.rosterPanel
+    );
+    this.input.on(
+      "pointerup",
+      this.rosterPanel.handlePointerUp,
+      this.rosterPanel
+    );
+    this.input.on(
+      "pointerupoutside",
+      this.rosterPanel.handlePointerUp,
+      this.rosterPanel
+    );
 
     this.refreshUI();
   }
@@ -222,317 +278,57 @@ export class TownScene extends Phaser.Scene {
     }
   }
 
-  private renderBackground() {
-    const width = this.scale.width;
-    const height = this.scale.height;
-
-    const bg = this.add.graphics();
-    bg.fillStyle(0x111319, 1);
-    bg.fillRect(0, 0, width, height);
-    this.worldLayer.add(bg);
-
-    const worldRight = width - this.safe - ROSTER_WIDTH - this.safe;
-    const plazaWidth = worldRight - this.safe;
-    const plazaHeight = height - this.safe * 2;
-    const plaza = this.add.graphics();
-    plaza.fillStyle(0x1a1f29, 1);
-    plaza.fillRect(this.safe, this.safe, plazaWidth, plazaHeight);
-    plaza.lineStyle(2, 0x2d3240, 1);
-    plaza.strokeRect(this.safe, this.safe, plazaWidth, plazaHeight);
-
-    // Cobblestone grid
-    plaza.lineStyle(1, 0x272d3a, 0.4);
-    const tile = 24;
-    for (let x = this.safe + tile; x < this.safe + plazaWidth; x += tile) {
-      const px = snap(x);
-      plaza.lineBetween(px, this.safe, px, this.safe + plazaHeight);
-    }
-    for (let y = this.safe + tile; y < this.safe + plazaHeight; y += tile) {
-      const py = snap(y);
-      plaza.lineBetween(this.safe, py, this.safe + plazaWidth, py);
-    }
-
-    // Central circle
-    const centerX = this.safe + plazaWidth / 2;
-    const centerY = this.safe + plazaHeight / 2;
-    plaza.fillStyle(0x242a38, 1);
-    plaza.fillCircle(centerX, centerY, 120);
-    plaza.lineStyle(2, 0x3b4254, 1);
-    plaza.strokeCircle(centerX, centerY, 120);
-    plaza.fillStyle(0x30394b, 1);
-    plaza.fillCircle(centerX, centerY, 78);
-    this.plazaCenterX = centerX;
-    this.plazaCenterY = centerY;
-    this.plazaRadius = 120;
-
-    this.worldLayer.add(plaza);
-  }
-
-  private renderBuildings() {
-    const width = this.scale.width;
-    const height = this.scale.height;
-    const worldRight = width - this.safe - ROSTER_WIDTH - this.safe;
-    const plazaWidth = worldRight - this.safe;
-    const plazaHeight = height - this.safe * 2;
-
-    const gapX =
-      GRID_COLUMNS > 1
-        ? (plazaWidth - BUILDING_WIDTH * GRID_COLUMNS) / (GRID_COLUMNS - 1)
-        : 0;
-    const gapY =
-      GRID_ROWS > 1
-        ? Math.max(
-            64,
-            (plazaHeight - BUILDING_HEIGHT * GRID_ROWS) / (GRID_ROWS - 1)
-          )
-        : 0;
-
-    BUILDINGS.forEach((def, index) => {
-      const x = this.safe + snap(def.col * (BUILDING_WIDTH + gapX));
-      const y = snap(this.safe + 64 + def.row * (BUILDING_HEIGHT + gapY));
-
-      const container = this.add.container(x, y);
-      this.worldLayer.add(container);
-
-      const base = this.add
-        .rectangle(0, 0, BUILDING_WIDTH, BUILDING_HEIGHT, 0x262c3b)
-        .setOrigin(0);
-      base.setStrokeStyle(2, 0x40485c, 1);
-      container.add(base);
-
-      const roof = this.add.rectangle(
-        BUILDING_WIDTH / 2,
-        -16,
-        BUILDING_WIDTH * 0.85,
-        32,
-        0x343c50
-      );
-      roof.setStrokeStyle(2, 0x4a5368, 1);
-      container.add(roof);
-
-      const label = this.add
-        .text(BUILDING_WIDTH / 2, 12, def.label, UI_FONT.heading)
-        .setOrigin(0.5, 0);
-      container.add(label);
-
-      const caption = this.add
-        .text(BUILDING_WIDTH / 2, 46, def.caption, {
-          ...UI_FONT.body,
-          fontSize: "12px",
-          color: "#b8bed4",
-          align: "center",
-          wordWrap: { width: BUILDING_WIDTH - 24 },
-        })
-        .setOrigin(0.5, 0);
-      container.add(caption);
-
-      base
-        .setInteractive({ cursor: "pointer" })
-        .on("pointerover", () => {
-          base.setFillStyle(0x2d3546);
-          this.showTooltip(
-            def.label,
-            def.caption,
-            x + BUILDING_WIDTH / 2,
-            y - 20
-          );
-        })
-        .on("pointerout", () => {
-          base.setFillStyle(0x262c3b);
-          this.hideTooltip();
-        })
-        .on("pointerdown", () => this.openBuilding(def.key));
-
-      // Hotkeys: 1-6
-      this.bindKey(`keydown-${index + 1}`, () => this.openBuilding(def.key));
-    });
-  }
-
-  private renderTopBar() {
-    const panel = this.add.container(this.safe, this.safe - 6);
-    this.uiLayer.add(panel);
-
-    const bg = this.add
-      .rectangle(
-        0,
-        0,
-        this.scale.width - this.safe * 2 - ROSTER_WIDTH - 24,
-        48,
-        0x1b1f2b
-      )
-      .setOrigin(0);
-    bg.setStrokeStyle(2, 0x343a4b, 1);
-    panel.add(bg);
-
-    const title = this.add
-      .text(16, 12, "Sanctum Town", UI_FONT.heading)
-      .setOrigin(0, 0);
-    panel.add(title);
-
-    this.goldPanel = this.add.container(bg.width - 16, 12);
-    panel.add(this.goldPanel);
-  }
-
-  private renderEmbarkCTA() {
-    this.embarkedCTA?.destroy();
-
-    const buttonWidth = 320;
-    const buttonHeight = BUTTON_DIMENSIONS.height;
-
-    // center the CTA container on the plaza circle center
-    const panel = this.add.container(this.plazaCenterX, this.plazaCenterY);
-    panel.setDepth(15);
-    this.uiLayer.add(panel);
-
-    // position the button so its center aligns with the panel center
-    const btn = this.createButton(
-      -buttonWidth / 2,
-      -buttonHeight / 2,
-      buttonWidth,
-      "Embark Adventure",
-      () => this.launchEmbark()
-    );
-
-    panel.add(btn);
-    this.embarkedCTA = panel;
-  }
-
-  private renderRoster() {
-    const x = this.scale.width - this.safe - ROSTER_WIDTH;
-    const y = this.safe;
-    const height = this.scale.height - this.safe * 2;
-
-    this.rosterPanel?.destroy();
-    this.rosterPanel = this.add.container(x, y);
-    this.uiLayer.add(this.rosterPanel);
-    this.rosterPanel.setSize(ROSTER_WIDTH, height);
-    this.rosterPanel.setInteractive(
-      new Phaser.Geom.Rectangle(0, 0, ROSTER_WIDTH, height),
-      Phaser.Geom.Rectangle.Contains
-    );
-    this.rosterPanel.on("pointerover", () => (this.rosterHover = true));
-    this.rosterPanel.on("pointerout", () => (this.rosterHover = false));
-
-    const bg = this.add
-      .rectangle(0, 0, ROSTER_WIDTH, height, 0x1b1f2b)
-      .setOrigin(0);
-    bg.setStrokeStyle(2, 0x343a4b, 1);
-    bg.setInteractive();
-    bg.on("pointerover", () => (this.rosterHover = true));
-    bg.on("pointerout", () => (this.rosterHover = false));
-    this.rosterPanel.add(bg);
-
-    this.rosterHeader = this.add
-      .text(16, 12, "", UI_FONT.heading)
-      .setOrigin(0, 0);
-    this.updateRosterHeader();
-    this.rosterPanel.add(this.rosterHeader);
-
-    const scrollHint = this.add
-      .text(ROSTER_WIDTH - 18, 14, "⇅", {
-        ...UI_FONT.caption,
-        color: "#6a7188",
-      })
-      .setOrigin(1, 0);
-    this.rosterPanel.add(scrollHint);
-
-    const maskRect = this.add.rectangle(
-      x + 12 + (ROSTER_WIDTH - 24) / 2,
-      y + 44 + (height - 56) / 2,
-      ROSTER_WIDTH - 24,
-      height - 56,
-      0xffffff,
-      0
-    );
-    this.rosterMask = maskRect.createGeometryMask();
-    maskRect.destroy();
-
-    this.rosterList = this.add.container(12, 44);
-    this.rosterList.setMask(this.rosterMask);
-    this.rosterPanel.add(this.rosterList);
-
-    const track = this.add
-      .rectangle(ROSTER_WIDTH - 10, 44, 4, height - 56, 0x1f2535, 0.6)
-      .setOrigin(0.5, 0);
-    this.rosterPanel.add(track);
-    track.setInteractive();
-    track.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (this.rosterMaxScroll <= 0) return;
-      const localY = (pointer.worldY ?? pointer.y) - (this.safe + 44);
-      const trackHeight =
-        this.rosterVisibleHeight - this.rosterScrollbar.height;
-      if (trackHeight <= 0) return;
-      const progress = Phaser.Math.Clamp(localY / trackHeight, 0, 1);
-      this.rosterScroll = -this.rosterMaxScroll * progress;
-      this.updateRosterPosition();
-    });
-
-    this.rosterScrollbar = this.add
-      .rectangle(ROSTER_WIDTH - 10, 44, 4, height - 56, 0x2b3144)
-      .setOrigin(0.5, 0);
-    this.rosterPanel.add(this.rosterScrollbar);
-    this.rosterScrollbar.setInteractive({ cursor: "grab" });
-    this.rosterScrollbar.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (this.rosterMaxScroll <= 0) return;
-      const trackHeight =
-        this.rosterVisibleHeight - this.rosterScrollbar.height;
-      if (trackHeight <= 0) return;
-      this.rosterDragging = true;
-      this.rosterDragStartY = pointer.worldY ?? pointer.y;
-      this.rosterScrollStart = this.rosterScroll;
-      this.input.setDefaultCursor("grabbing");
-    });
-
-    if (this.rosterWheelHandler) {
-      this.input.off("wheel", this.rosterWheelHandler, this);
-    }
-    this.rosterWheelHandler = (pointer, _objects, _dx, dy, _dz) => {
-      const posX = pointer.worldX ?? pointer.x;
-      const posY = pointer.worldY ?? pointer.y;
-
-      const bounds = new Phaser.Geom.Rectangle(
-        this.scale.width - this.safe - ROSTER_WIDTH,
-        this.safe,
-        ROSTER_WIDTH,
-        this.scale.height - this.safe * 2
-      );
-      if (!bounds.contains(posX, posY)) return;
-
-      if (this.rosterMaxScroll > 0) {
-        this.rosterScroll = clamp(
-          this.rosterScroll - dy * 0.5,
-          -this.rosterMaxScroll,
-          0
-        );
-        this.updateRosterPosition();
-      }
-    };
-    this.input.on("wheel", this.rosterWheelHandler, this);
-  }
-
   private refreshUI() {
     this.renderGold();
-    this.populateRoster();
-    this.updateRosterHeader();
+    this.updateRosterPanel();
+  }
+
+  private updateRosterPanel() {
+    const rosterState: RosterPanelState = {
+      walletAddress: this.walletAddress,
+      heroes: this.heroes,
+      heroesLoading: this.heroesLoading,
+      heroLoadError: this.heroLoadError,
+      expandedHeroId: this.expandedHeroId,
+    };
+    this.rosterPanel?.update(rosterState);
+    this.broadcastHeroRoster();
+  }
+
+  private broadcastHeroRoster() {
+    this.registry.set("town:heroRoster", {
+      heroes: [...this.heroes],
+      heroesLoading: this.heroesLoading,
+      heroLoadError: this.heroLoadError,
+      walletAddress: this.walletAddress,
+    });
   }
 
   private renderGold() {
     this.goldPanel.removeAll(true);
     const gold = this.state.inventory.gold;
-    const plate = this.add.rectangle(0, 0, 180, 24, 0x252b3a).setOrigin(1, 0);
+    const plate = this.add
+      .rectangle(0, 0, GOLD_PANEL_WIDTH, 24, 0x252b3a)
+      .setOrigin(1, 0);
     plate.setStrokeStyle(1, 0x40485c, 1);
     plate.setInteractive({ cursor: "default" });
     this.goldPanel.add(plate);
 
+    const leftPadding = 16;
+    const rightPadding = 12;
+
     this.goldPanel.add(
       this.add
-        .text(-165, 4, "Gold", { ...UI_FONT.body, color: "#c1c6db" })
+        .text(-GOLD_PANEL_WIDTH + leftPadding, 4, "Gold", {
+          ...UI_FONT.body,
+          color: "#c1c6db",
+        })
         .setOrigin(0, 0)
     );
 
     this.goldPanel.add(
       this.add
-        .text(-12, 4, gold.toLocaleString(), {
+        .text(-rightPadding, 4, gold.toLocaleString(), {
           ...UI_FONT.heading,
           fontSize: "18px",
           color: "#ffe28a",
@@ -541,393 +337,724 @@ export class TownScene extends Phaser.Scene {
     );
   }
 
-  private populateRoster() {
-    this.rosterList.removeAll(true);
-    this.rosterDetail?.destroy();
+  private initWalletIntegration() {
+    const provider = this.getWalletProvider();
+    if (!provider) {
+      this.updateWalletControl();
+      return;
+    }
 
-    const rowHeight = 72;
-    const gap = 10;
-    const visibleHeight = this.scale.height - this.safe * 2 - 56;
-    this.rosterVisibleHeight = visibleHeight;
+    this.walletProvider = provider;
 
-    let offsetY = 0;
-    const heroPositions: Record<string, number> = {};
+    this.walletConnectHandler = (publicKey) => {
+      const address = this.resolveWalletAddress(
+        publicKey ?? provider.publicKey ?? undefined
+      );
+      if (!address) return;
+      this.walletAddress = address;
+      this.walletBusy = false;
+      this.playerProfile = undefined;
+      this.updateWalletControl();
+      this.loadHeroes(address);
+    };
 
-    this.state.heroes.forEach((hero) => {
-      const row = this.createRosterRow(hero);
-      row.y = offsetY;
-      this.rosterList.add(row);
-      heroPositions[hero.id] = offsetY;
-      offsetY += rowHeight + gap;
+    this.walletDisconnectHandler = () => {
+      this.walletAddress = undefined;
+      this.walletBusy = false;
+      this.heroes = [];
+      this.heroesLoading = false;
+      this.heroLoadError = undefined;
+      this.expandedHeroId = undefined;
+      this.playerProfile = undefined;
+      this.updateWalletControl();
+      this.updateRosterPanel();
+    };
+
+    provider.on?.("connect", (...args) =>
+      this.walletConnectHandler?.(args[0] as WalletPublicKey)
+    );
+    provider.on?.("disconnect", () => this.walletDisconnectHandler?.());
+
+    if (provider.publicKey) {
+      const address = this.resolveWalletAddress(provider.publicKey);
+      if (address) {
+        this.walletAddress = address;
+        this.playerProfile = undefined;
+        this.loadHeroes(address);
+      }
+    }
+    this.updateWalletControl();
+  }
+
+  private teardownWalletIntegration() {
+    if (!this.walletProvider) return;
+    if (this.walletConnectHandler) {
+      this.walletProvider.off?.("connect", (...args) =>
+        this.walletConnectHandler?.(args[0] as WalletPublicKey)
+      );
+      this.walletProvider.removeListener?.("connect", (...args) =>
+        this.walletConnectHandler?.(args[0] as WalletPublicKey)
+      );
+    }
+    if (this.walletDisconnectHandler) {
+      this.walletProvider.off?.("disconnect", this.walletDisconnectHandler);
+      this.walletProvider.removeListener?.(
+        "disconnect",
+        this.walletDisconnectHandler
+      );
+    }
+    this.walletConnectHandler = undefined;
+    this.walletDisconnectHandler = undefined;
+  }
+
+  private async connectWallet() {
+    const provider = this.getWalletProvider();
+    if (!provider) {
+      this.showToast("No Solana wallet detected.");
+      return;
+    }
+    if (this.walletBusy) return;
+
+    this.walletBusy = true;
+    this.updateWalletControl();
+
+    try {
+      const result = await provider.connect();
+      const address = this.resolveWalletAddress(
+        (result as { publicKey?: WalletPublicKey })?.publicKey ??
+          provider.publicKey ??
+          undefined
+      );
+      if (address) {
+        this.walletAddress = address;
+        this.showToast(`Connected ${this.shortenAddress(address)}`);
+        this.loadHeroes(address);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : typeof err === "string" ? err : "";
+      if (!message || /user rejected/i.test(message)) {
+        // user closed the modal; no toast to avoid noise
+      } else if (/wallet not/i.test(message)) {
+        this.showToast("Wallet not found. Install a Solana wallet.");
+      } else {
+        this.showToast("Failed to connect wallet.");
+      }
+    } finally {
+      this.walletBusy = false;
+      this.updateWalletControl();
+    }
+  }
+
+  private async disconnectWallet() {
+    const provider = this.walletProvider ?? this.getWalletProvider();
+    if (!provider || this.walletBusy) return;
+
+    this.walletBusy = true;
+    this.updateWalletControl();
+
+    try {
+      await provider.disconnect();
+      this.walletAddress = undefined;
+      this.showToast("Wallet disconnected. Connect again to keep exploring.");
+    } catch {
+      this.showToast("Failed to disconnect wallet.");
+    } finally {
+      this.walletBusy = false;
+      this.heroes = [];
+      this.heroesLoading = false;
+      this.heroLoadError = undefined;
+      this.expandedHeroId = undefined;
+      this.updateWalletControl();
+      this.updateRosterPanel();
+    }
+  }
+
+  private async loadHeroes(ownerAddress: string) {
+    if (!ownerAddress) return;
+    const requestOwner = ownerAddress;
+    this.heroesLoading = true;
+    this.heroLoadError = undefined;
+    this.playerProfile = undefined;
+
+    this.updateRosterPanel();
+
+    try {
+      const connection = this.getSolanaConnection();
+      if (!connection) {
+        throw new Error("RPC unavailable.");
+      }
+      const ownerPk = new PublicKey(ownerAddress);
+
+      const [heroes, profile] = await Promise.all([
+        fetchHeroes(connection, ownerPk),
+        fetchPlayerProfile(connection, ownerPk),
+      ]);
+      if (this.walletAddress !== requestOwner) return;
+      // Pending requests should be filtered out, but some older mints may not
+      // populate the flag. Treat undefined as settled so legacy heroes appear.
+      this.heroes = heroes.filter((hero) => (hero.pendingRequest ?? 0) === 0);
+      this.playerProfile = profile;
+    } catch (error) {
+      if (this.walletAddress !== requestOwner) return;
+      const message =
+        error instanceof Error ? error.message : "Failed to load heroes.";
+      this.heroLoadError = message;
+      this.heroes = [];
+      this.playerProfile = null;
+    } finally {
+      if (this.walletAddress !== requestOwner) return;
+      this.heroesLoading = false;
+      this.updateRosterPanel();
+    }
+  }
+
+  private openWalletModal() {
+    const address = this.walletAddress;
+    if (!address) {
+      this.connectWallet();
+      return;
+    }
+
+    let balanceText: Phaser.GameObjects.Text | undefined;
+
+    this.openModal("Adventurer Wallet", (panel, close) => {
+      let offset = 0;
+      const sectionLabel = this.add
+        .text(0, offset, "Connected Address", {
+          ...UI_FONT.caption,
+          color: "#7e859b",
+        })
+        .setOrigin(0, 0);
+      panel.add(sectionLabel);
+      offset += sectionLabel.height + 6;
+
+      const addressText = this.add
+        .text(0, offset, address, {
+          ...UI_FONT.body,
+          color: "#f4f6ff",
+          wordWrap: { width: 420 },
+        })
+        .setOrigin(0, 0);
+      panel.add(addressText);
+      offset += addressText.height + 16;
+
+      balanceText = this.add
+        .text(0, offset, "Balance: Fetching...", {
+          ...UI_FONT.body,
+          color: "#c1c6db",
+        })
+        .setOrigin(0, 0);
+      panel.add(balanceText);
+      offset += balanceText.height + 24;
+
+      const disconnectBtn = createButton(
+        this,
+        0,
+        offset,
+        200,
+        "Disconnect Wallet",
+        () => {
+          this.disconnectWallet().finally(() => close());
+        }
+      );
+      panel.add(disconnectBtn);
     });
 
-    this.rosterMaxScroll = Math.max(0, offsetY - visibleHeight);
-    this.rosterScroll = clamp(this.rosterScroll, -this.rosterMaxScroll, 0);
-    this.updateRosterPosition();
+    if (balanceText) {
+      this.fetchWalletBalance(address, balanceText);
+    }
+  }
 
-    if (this.expandedHeroId) {
-      const hero = this.state.heroes.find((h) => h.id === this.expandedHeroId);
-      if (hero) {
-        const overlay = this.createRosterDetail(hero);
-        const baseY = heroPositions[hero.id] + this.rosterScroll;
-        overlay.setPosition(12, clamp(baseY, 44, visibleHeight - 140 + 44));
-        overlay.setMask(this.rosterMask);
-        this.rosterPanel.add(overlay);
-        this.rosterDetail = overlay;
+  private async fetchWalletBalance(
+    address: string,
+    label: Phaser.GameObjects.Text
+  ) {
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      if (label.scene) {
+        label.setText("Balance: RPC unavailable.");
+      }
+      return;
+    }
+
+    try {
+      const key = new PublicKey(address);
+      const lamports = await connection.getBalance(key);
+      if (!label.scene || this.walletAddress !== address) return;
+      const sol = lamports / LAMPORTS_PER_SOL;
+      label.setText(`Balance: ${sol.toFixed(4)} SOL`);
+    } catch {
+      if (!label.scene) return;
+      label.setText("Balance: Unable to fetch.");
+    }
+  }
+
+  private getSolanaConnection(): Connection | undefined {
+    if (typeof window === "undefined") return undefined;
+    if (!this.solanaConnection) {
+      const env =
+        (
+          import.meta as unknown as {
+            env?: Record<string, string | undefined>;
+          }
+        ).env ?? {};
+      const endpoint =
+        env.VITE_SOLANA_RPC_URL ??
+        (window as unknown as { __DNB_SOLANA_RPC__?: string })
+          .__DNB_SOLANA_RPC__ ??
+        clusterApiUrl("devnet");
+      this.solanaConnection = new Connection(endpoint, "confirmed");
+    }
+    return this.solanaConnection;
+  }
+
+  private async initializePlayerProfile() {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) return;
+    const provider = this.getWalletProvider();
+    const connection = this.getSolanaConnection();
+    if (!provider) {
+      this.showToast("Wallet provider unavailable.");
+      return;
+    }
+    if (!connection) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+    try {
+      const existing = await fetchPlayerProfile(connection, owner);
+      if (existing) {
+        this.playerProfile = existing;
+        this.showToast("Adventurer ledger already initialized.");
+        await this.loadHeroes(this.walletAddress);
+        return;
+      }
+    } catch (err) {
+      console.warn("Failed to probe player profile before init:", err);
+    }
+
+    const ix = createInitializePlayerInstruction(owner);
+
+    this.programBusy = true;
+    try {
+      await this.sendProgramTransaction([ix]);
+      this.showToast("Adventurer ledger initialized.");
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openTavern();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to initialize ledger.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async mintHero() {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy || this.heroesLoading) return;
+
+    if (this.playerProfile === null) {
+      await this.initializePlayerProfile();
+      return;
+    }
+
+    if (!this.playerProfile) {
+      this.showToast("Player profile not yet loaded.");
+      return;
+    }
+
+    const profile = this.playerProfile;
+    if (profile.heroCount >= MAX_HEROES) {
+      this.showToast("Hero roster is at capacity.");
+      return;
+    }
+
+    const freeRemaining = Math.max(
+      0,
+      HERO_FREE_MINT_LIMIT - profile.freeMintCount
+    );
+    const mintType = freeRemaining > 0 ? "free" : "paid";
+
+    const owner = new PublicKey(this.walletAddress);
+    const { instruction } = createMintHeroInstruction({
+      owner,
+      profile,
+      mintType,
+    });
+
+    this.programBusy = true;
+    try {
+      await this.sendProgramTransaction([instruction]);
+      const toastMessage =
+        mintType === "free"
+          ? "Summon request submitted. Awaiting VRF callback."
+          : "Paid summon submitted. Awaiting VRF callback.";
+      this.showToast(toastMessage);
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openTavern();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to mint hero.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async levelUpHero(hero: ChainHero) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy || this.heroesLoading) {
+      this.showToast("Another action is still processing.");
+      return;
+    }
+    if (hero.pendingRequest !== 0) {
+      this.showToast("That hero is already waiting on a VRF callback.");
+      return;
+    }
+    const next = getNextLevelRequirement(hero);
+    if (!next) {
+      this.showToast("Hero already reached the maximum level.");
+      return;
+    }
+    if (!canLevelUpHero(hero)) {
+      this.showToast(
+        `Requires XP greater than ${next.requiredExperience} to reach level ${next.targetLevel}.`
+      );
+      return;
+    }
+
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+    const instruction = createLevelUpInstruction({
+      owner,
+      heroId: hero.id,
+    });
+
+    this.programBusy = true;
+    try {
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Level-up submitted for Hero #${hero.id}. Awaiting VRF callback.`
+      );
+      await this.loadHeroes(this.walletAddress);
+    } catch (err) {
+      this.handleProgramError(err, "Failed to level up hero.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async sendProgramTransaction(
+    instructions: TransactionInstruction[]
+  ): Promise<string> {
+    const provider = this.getWalletProvider();
+    if (!provider) {
+      throw new Error("Wallet provider unavailable.");
+    }
+    if (!this.walletAddress) {
+      throw new Error("Wallet not connected.");
+    }
+
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      throw new Error("RPC unavailable.");
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+    const latestBlockhash = await connection.getLatestBlockhash();
+
+    const tx = new Transaction().add(...instructions);
+    tx.feePayer = owner;
+    tx.recentBlockhash = latestBlockhash.blockhash;
+
+    // UNCOMMENT TO DEBUG: Try to simulate first to catch errors
+    // console.log("Attempting transaction simulation...");
+    // try {
+    //   const simulation = await connection.simulateTransaction(tx);
+    //   if (simulation.value.err) {
+    //     console.error("Simulation error:", simulation.value.err);
+    //     console.error("Simulation logs:", simulation.value.logs);
+    //     throw new Error(
+    //       `Simulation failed: ${JSON.stringify(simulation.value.err)}`
+    //     );
+    //   } else {
+    //     console.log("Simulation successful");
+    //     console.log("Simulation logs:", simulation.value.logs);
+    //   }
+    // } catch (simErr) {
+    //   console.error(
+    //     "Simulation attempt failed (this might be expected):",
+    //     simErr
+    //   );
+    // }
+
+    // Sign the transaction
+    let signature: string;
+    try {
+      if (provider.signAndSendTransaction) {
+        const result = await provider.signAndSendTransaction(tx);
+        signature =
+          typeof result === "string" ? result : result.signature ?? "";
+      } else if (provider.signTransaction) {
+        const signed = await provider.signTransaction(tx);
+        signature = await connection.sendRawTransaction(signed.serialize());
       } else {
-        this.expandedHeroId = undefined;
+        throw new Error("Wallet does not support transaction signing.");
+      }
+
+      if (!signature) {
+        throw new Error("Transaction signature missing.");
+      }
+    } catch (err) {
+      throw err;
+    }
+
+    // Wait for confirmation
+    try {
+      const confirmation = await connection.confirmTransaction(
+        {
+          signature,
+          blockhash: latestBlockhash.blockhash,
+          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+
+      if (confirmation.value.err) {
+        throw new Error(
+          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+        );
+      }
+
+      return signature;
+    } catch (err) {
+      throw err;
+    }
+  }
+
+  private handleProgramError(error: unknown, fallback: string) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : fallback;
+
+    if (/user rejected/i.test(message)) {
+      this.showToast("Transaction cancelled.");
+    } else {
+      console.error(error);
+      this.showToast(fallback);
+    }
+  }
+
+  private updateWalletControl() {
+    if (!this.walletPanel) return;
+
+    this.walletPanel.removeAll(true);
+
+    const provider = this.getWalletProvider();
+    const hasProvider = Boolean(provider);
+    const connected = Boolean(this.walletAddress);
+    const baseColor = !hasProvider
+      ? PANEL_COLORS.disabled
+      : connected
+      ? PANEL_COLORS.highlight
+      : 0x252b3a;
+    const hoverColor = !hasProvider
+      ? PANEL_COLORS.disabled
+      : PANEL_COLORS.hover;
+
+    const plate = this.add
+      .rectangle(0, 0, WALLET_PANEL_WIDTH, WALLET_PANEL_HEIGHT, baseColor)
+      .setOrigin(0);
+    plate.setStrokeStyle(1, 0x40485c, 1);
+    this.walletPanel.add(plate);
+
+    this.walletPanel.add(
+      this.add
+        .text(12, 6, "Wallet", {
+          ...UI_FONT.caption,
+          color: "#6a7188",
+        })
+        .setOrigin(0, 0)
+    );
+
+    const status = this.walletBusy
+      ? "Connecting..."
+      : connected
+      ? `Manage ${this.shortenAddress(this.walletAddress!)}`
+      : hasProvider
+      ? "Connect Wallet"
+      : "No wallet detected";
+    const statusColor = connected ? "#8de9a3" : "#c1c6db";
+
+    this.walletStatusText = this.add
+      .text(12, 18, status, {
+        ...UI_FONT.body,
+        fontSize: "12px",
+        color: this.walletBusy ? "#c1c6db" : statusColor,
+      })
+      .setOrigin(0, 0);
+    this.walletPanel.add(this.walletStatusText);
+
+    if (!hasProvider) {
+      plate
+        .setInteractive({ cursor: "not-allowed" })
+        .on("pointerdown", () =>
+          this.showToast("No Solana wallet detected. Install a wallet to play.")
+        );
+      return;
+    }
+
+    if (this.walletBusy) {
+      plate.setInteractive({ cursor: "wait" });
+      return;
+    }
+
+    plate
+      .setInteractive({ cursor: "pointer" })
+      .on("pointerover", () => plate.setFillStyle(hoverColor))
+      .on("pointerout", () => plate.setFillStyle(baseColor))
+      .on("pointerdown", () => {
+        if (this.walletAddress) {
+          this.openWalletModal();
+        } else {
+          this.connectWallet();
+        }
+      });
+  }
+
+  private getWalletProvider(): SolanaProvider | undefined {
+    if (this.walletProvider) return this.walletProvider;
+    if (typeof window === "undefined") return undefined;
+    const candidate = (window as unknown as { solana?: SolanaProvider }).solana;
+    if (candidate) {
+      this.walletProvider = candidate;
+      return candidate;
+    }
+    return undefined;
+  }
+
+  private resolveWalletAddress(
+    key?: WalletPublicKey | string | null
+  ): string | undefined {
+    if (!key) return undefined;
+    if (typeof key === "string") {
+      return key;
+    }
+    try {
+      return key.toBase58();
+    } catch {
+      try {
+        return key.toString();
+      } catch {
+        return undefined;
       }
     }
   }
 
-  private updateRosterHeader() {
-    if (!this.rosterHeader) return;
-    this.rosterHeader.setText(
-      `Roster (${this.state.heroes.length}/${MAX_HEROES})`
-    );
+  private shortenAddress(address: string) {
+    if (address.length <= 8) return address;
+    return `${address.slice(0, 4)}...${address.slice(-4)}`;
   }
 
-  private createRosterRow(hero: Hero) {
-    const container = this.add.container(0, 0);
-    const bg = this.add
-      .rectangle(0, 0, ROSTER_WIDTH - 48, 72, 0x232737)
-      .setOrigin(0);
-    bg.setStrokeStyle(1, 0x3a4052, 1);
-    container.add(bg);
-
-    bg.setInteractive({ cursor: "pointer" })
-      .on("pointerover", () => {
-        bg.setFillStyle(0x2a3043);
-        this.rosterHover = true;
-      })
-      .on("pointerout", () => {
-        bg.setFillStyle(0x232737);
-        this.rosterHover = false;
-      })
-      .on("pointerdown", () => {
-        this.expandedHeroId =
-          this.expandedHeroId === hero.id ? undefined : hero.id;
-        this.populateRoster();
-      });
-
-    container.add(
-      this.add.text(12, 10, hero.name, UI_FONT.body).setOrigin(0, 0)
-    );
-    container.add(
-      this.add
-        .text(ROSTER_WIDTH - 60, 10, hero.cls, {
-          ...UI_FONT.caption,
-          color: "#9fa6c0",
-        })
-        .setOrigin(1, 0)
-    );
-    container.add(
-      this.add
-        .text(12, 26, `Lv ${hero.level}`, {
-          ...UI_FONT.caption,
-          color: "#8fb0ff",
-        })
-        .setOrigin(0, 0)
-    );
-
-    const hpRatio = hero.hp / hero.maxHp;
-    const hpBarBg = this.add
-      .rectangle(12, 44, ROSTER_WIDTH - 72, 6, 0x1a1d29)
-      .setOrigin(0, 0);
-    container.add(hpBarBg);
-    container.add(
-      this.add
-        .rectangle(12, 44, (ROSTER_WIDTH - 72) * hpRatio, 6, 0x68da87)
-        .setOrigin(0, 0)
-    );
-    container.add(
-      this.add
-        .text(12, 52, `HP ${hero.hp}/${hero.maxHp}`, {
-          ...UI_FONT.caption,
-          color: "#9cbcaa",
-        })
-        .setOrigin(0, 0)
-    );
-    container.add(
-      this.add
-        .text(ROSTER_WIDTH - 60, 52, `Stress ${hero.stress}%`, {
-          ...UI_FONT.caption,
-          color:
-            hero.stress > 70
-              ? "#ff6b6b"
-              : hero.stress > 45
-              ? "#ffc36b"
-              : "#9dc9ff",
-        })
-        .setOrigin(1, 0)
-    );
-    return container;
-  }
-
-  private createRosterDetail(hero: Hero) {
-    const width = ROSTER_WIDTH - 48;
-    const detail = this.add.container(12, 0);
-    const bg = this.add.rectangle(0, 0, width, 120, 0x1f2432).setOrigin(0);
-    bg.setStrokeStyle(2, 0x47607f, 1);
-    detail.add(bg);
-
-    const derived = computeDerivedStats(hero);
-    let cursorY = 10;
-
-    const addLine = (
-      text: string,
-      style: Phaser.Types.GameObjects.Text.TextStyle,
-      spacing = 6
-    ) => {
-      const label = this.add.text(12, cursorY, text, style).setOrigin(0, 0);
-      detail.add(label);
-      cursorY += label.height + spacing;
-      return label;
-    };
-
-    addLine(
-      `${hero.name} (${hero.cls})`,
-      { ...UI_FONT.body, color: "#f4f6ff" },
-      8
-    );
-
-    addLine(`Weapon ${hero.weaponLevel} • Armor ${hero.armorLevel}`, {
-      ...UI_FONT.caption,
-      color: "#9dadc6",
-    });
-
-    addLine(`HP ${hero.hp}/${hero.maxHp} • STA ${hero.coreStats.sta}`, {
-      ...UI_FONT.caption,
-      color: "#b9c6dd",
-    });
-
-    addLine(
-      `ATK ${hero.coreStats.atk} • DEF ${hero.coreStats.def} • MAG ${hero.coreStats.mag} • RES ${hero.coreStats.res}`,
-      { ...UI_FONT.caption, color: "#b9c6dd" }
-    );
-    addLine(`SPD ${hero.coreStats.spd} • LCK ${hero.coreStats.lck}`, {
-      ...UI_FONT.caption,
-      color: "#b9c6dd",
-    });
-
-    addLine(
-      `ACC ${Math.round(derived.accuracy)}% • CRIT ${Math.round(
-        derived.critChance
-      )}% • DODGE ${Math.round(derived.dodge)}%`,
-      { ...UI_FONT.caption, color: "#94c7ff" }
-    );
-
-    addLine(
-      `DMG ${derived.physicalDamage.min}-${derived.physicalDamage.max} / ${
-        derived.magicDamage.min
-      }-${derived.magicDamage.max} • PEN ${Math.round(
-        derived.armorPen
-      )} • INIT ${derived.initiative}`,
-      { ...UI_FONT.caption, color: "#94c7ff" }
-    );
-    addLine(`DEBUFF RES ${Math.round(derived.debuffResist)}%`, {
-      ...UI_FONT.caption,
-      color: "#94c7ff",
-    });
-
-    const elem = hero.elemental;
-    addLine(
-      `Element Off F${elem.offense.fire} I${elem.offense.ice} H${elem.offense.holy} S${elem.offense.shadow}`,
-      { ...UI_FONT.caption, color: "#c7b4ff" }
-    );
-    addLine(
-      `Element Res F${elem.resistance.fire} I${elem.resistance.ice} H${elem.resistance.holy} S${elem.resistance.shadow}`,
-      { ...UI_FONT.caption, color: "#c7b4ff" }
-    );
-
-    const traits = hero.traits
-      .concat(hero.diseases)
-      .map((t) => {
-        const prefix =
-          t.category === "virtue"
-            ? "+"
-            : t.category === "affliction"
-            ? "-"
-            : t.category === "disease"
-            ? "!"
-            : "•";
-        return `${prefix}${t.name}`;
-      })
-      .join(", ");
-    addLine(traits || "No notable quirks.", {
-      ...UI_FONT.caption,
-      color: "#b2b7cc",
-      wordWrap: { width: width - 24 },
-    });
-
-    const activeSkills = hero.activeSkillIds
-      .map((id) => hero.skills.find((s) => s.id === id)?.name)
-      .filter(Boolean)
-      .join(", ");
-    addLine(`Active: ${activeSkills || "No skills equipped."}`, {
-      ...UI_FONT.caption,
-      color: "#94c7ff",
-      wordWrap: { width: width - 24 },
-    });
-
-    bg.setSize(width, cursorY + 8);
-
-    return detail;
-  }
-
-  private updateRosterPosition() {
-    this.rosterList.y = 44 + this.rosterScroll;
-    if (this.rosterMaxScroll <= 0) {
-      this.rosterScrollbar.setVisible(false);
-      return;
-    }
-    this.rosterScrollbar.setVisible(true);
-    const visibleHeight = this.scale.height - this.safe * 2 - 56;
-    const ratio = visibleHeight / (visibleHeight + this.rosterMaxScroll);
-    const thumbHeight = Math.max(24, (visibleHeight - 8) * ratio);
-    const progress = this.rosterScroll / -this.rosterMaxScroll;
-    const trackHeight = visibleHeight - thumbHeight;
-    this.rosterScrollbar.height = thumbHeight;
-    this.rosterScrollbar.y = 44 + progress * trackHeight;
-  }
-
-  private onRosterPointerMove(pointer: Phaser.Input.Pointer) {
-    if (!this.rosterDragging || this.rosterMaxScroll <= 0) return;
-    const trackHeight = this.rosterVisibleHeight - this.rosterScrollbar.height;
-    if (trackHeight <= 0) return;
-    const pointerY = pointer.worldY ?? pointer.y;
-    const delta = pointerY - this.rosterDragStartY;
-    const startProgress =
-      this.rosterMaxScroll === 0
-        ? 0
-        : this.rosterScrollStart / -this.rosterMaxScroll;
-    const progress = Phaser.Math.Clamp(
-      startProgress + delta / trackHeight,
-      0,
-      1
-    );
-    this.rosterScroll = -this.rosterMaxScroll * progress;
-    this.updateRosterPosition();
-  }
-
-  private onRosterPointerUp() {
-    if (!this.rosterDragging) return;
-    this.rosterDragging = false;
-    this.input.setDefaultCursor("default");
-  }
-
-  private createButton(
-    x: number,
-    y: number,
-    width: number,
-    label: string,
-    handler: () => void,
-    enabled = true
+  private renderHeroModalSection(
+    panel: Phaser.GameObjects.Container,
+    startY: number,
+    renderer: (hero: ChainHero, offset: number) => number
   ) {
-    const container = this.add.container(x, y);
-    const rect = this.add
-      .rectangle(
-        0,
-        0,
-        width,
-        BUTTON_DIMENSIONS.height,
-        enabled ? PANEL_COLORS.highlight : PANEL_COLORS.disabled
-      )
-      .setOrigin(0)
-      .setStrokeStyle(1, 0x4a5976, 1);
-    container.add(rect);
-
-    const text = this.add
-      .text(width / 2, BUTTON_DIMENSIONS.height / 2, label, {
-        ...UI_FONT.body,
-        fontSize: "12px",
-        color: enabled ? "#f4f6ff" : "#7d869d",
-      })
-      .setOrigin(0.5);
-    container.add(text);
-
-    if (enabled) {
-      rect
-        .setInteractive({ cursor: "pointer" })
-        .on("pointerover", () => rect.setFillStyle(PANEL_COLORS.hover))
-        .on("pointerout", () => rect.setFillStyle(PANEL_COLORS.highlight))
-        .on("pointerdown", handler);
+    if (!this.walletAddress) {
+      panel.add(
+        this.add
+          .text(
+            0,
+            startY,
+            "Connect your wallet to manage heroes.",
+            UI_FONT.body
+          )
+          .setOrigin(0, 0)
+      );
+      return startY + 24;
     }
 
-    return container;
-  }
-
-  private showTooltip(title: string, caption: string, x: number, y: number) {
-    this.hideTooltip();
-
-    const tooltip = this.add.container(0, 0);
-    const padding = 10;
-    const contentWidth = 220;
-
-    const textTitle = this.add
-      .text(0, 0, title, {
-        ...UI_FONT.body,
-        color: "#f4f6ff",
-      })
-      .setOrigin(0, 0);
-    tooltip.add(textTitle);
-
-    const textBody = this.add
-      .text(0, textTitle.height + 4, caption, {
-        ...UI_FONT.caption,
-        color: "#c4c9dc",
-        wordWrap: { width: contentWidth },
-      })
-      .setOrigin(0, 0);
-    tooltip.add(textBody);
-
-    const width = Math.max(textTitle.width, contentWidth) + padding * 2;
-    const height = textTitle.height + textBody.height + padding * 2;
-
-    const bg = this.add
-      .rectangle(0, 0, width, height, 0x1e2332, 0.95)
-      .setOrigin(0);
-    bg.setStrokeStyle(1, 0x3c455a, 1);
-    tooltip.addAt(bg, 0);
-
-    let tx = snap(x - width / 2);
-    let ty = snap(y - height - 12);
-    if (tx < this.safe) tx = this.safe;
-    if (tx + width > this.scale.width - this.safe - ROSTER_WIDTH) {
-      tx = this.scale.width - this.safe - ROSTER_WIDTH - width;
+    if (this.heroesLoading) {
+      panel.add(
+        this.add
+          .text(0, startY, "Loading hero roster...", UI_FONT.body)
+          .setOrigin(0, 0)
+      );
+      return startY + 24;
     }
-    if (ty < this.safe) ty = y + 16;
 
-    tooltip.setPosition(tx, ty);
-    tooltip.setDepth(50);
-    this.tooltipLayer.add(tooltip);
-    this.tooltip = tooltip;
+    if (this.heroLoadError) {
+      panel.add(
+        this.add
+          .text(0, startY, `Failed to load heroes: ${this.heroLoadError}`, {
+            ...UI_FONT.body,
+            color: "#ff8a8a",
+            wordWrap: { width: 432 },
+          })
+          .setOrigin(0, 0)
+      );
+      return startY + 36;
+    }
+
+    if (!this.heroes.length) {
+      panel.add(
+        this.add
+          .text(0, startY, "No heroes minted yet.", UI_FONT.body)
+          .setOrigin(0, 0)
+      );
+      return startY + 24;
+    }
+
+    let offset = startY;
+    this.heroes.forEach((hero) => {
+      offset = renderer(hero, offset);
+    });
+    return offset;
   }
 
-  private hideTooltip() {
-    this.tooltip?.destroy();
-    this.tooltip = undefined;
-  }
-
-  private openBuilding(key: BuildingKey, heroId?: string) {
+  private openBuilding(key: BuildingKey) {
     switch (key) {
       case "tavern":
-        this.openTavern(heroId);
+        this.openTavern();
         break;
       case "sanitarium":
-        this.openSanitarium(heroId);
+        this.openSanitarium();
         break;
       case "blacksmith":
-        this.openBlacksmith(heroId);
+        this.openBlacksmith();
         break;
       case "guild":
-        this.openGuild(heroId);
+        this.openGuild();
         break;
       case "market":
         this.openMarket();
         break;
       case "abbey":
-        this.openAbbey(heroId);
+        this.openAbbey();
         break;
     }
   }
@@ -966,7 +1093,7 @@ export class TownScene extends Phaser.Scene {
     this.modalPanel.add(titleText);
 
     // close button (position updated after final width is known)
-    const closeBtn = this.createButton(0, 16, 92, "Close", () =>
+    const closeBtn = createButton(this, 0, 16, 92, "Close", () =>
       this.closeModal()
     );
     this.modalPanel.add(closeBtn);
@@ -1074,267 +1201,362 @@ export class TownScene extends Phaser.Scene {
     this.modalPanel = undefined;
   }
 
-  private openTavern(heroId?: string) {
+  private openTavern() {
     this.openModal("The Sable Hearth Tavern", (panel) => {
-      panel.add(
-        this.add
-          .text(0, 0, "Recruit adventurers or rent rooms for the weary.", {
+      const intro = this.add
+        .text(
+          0,
+          0,
+          "On-chain heroes gather here between expeditions. Minted allies appear below once your wallet is connected.",
+          {
             ...UI_FONT.body,
             wordWrap: { width: 432 },
-          })
-          .setOrigin(0, 0)
-      );
-
-      const recruitEnabled = this.state.heroes.length < MAX_HEROES;
-      const recruitBtn = this.createButton(
-        0,
-        32,
-        200,
-        recruitEnabled ? "Recruit Hero (100g)" : "Roster Full",
-        () => {
-          const res = this.store.recruitHero();
-          this.showToast(res.message || "");
-        },
-        recruitEnabled
-      );
-      panel.add(recruitBtn);
-
-      const restHeader = this.add
-        .text(0, 82, "Rest heroes (−30 stress, 25g each)", UI_FONT.body)
+          }
+        )
         .setOrigin(0, 0);
-      panel.add(restHeader);
+      panel.add(intro);
 
-      let offset = 110;
-      this.state.heroes.forEach((hero) => {
-        const row = this.createButton(
-          0,
+      let offset = intro.height + 16;
+
+      if (!this.walletAddress) {
+        this.renderHeroModalSection(
+          panel,
           offset,
-          360,
-          `${hero.name} — ${hero.stress}% stress`,
-          () => {
-            const res = this.store.restHero(hero.id);
-            this.showToast(res.message || "");
-          },
-          hero.stress > 0
-        );
-        if (heroId && hero.id === heroId) offset += 40;
-        panel.add(row);
-        offset += 40;
-      });
-    });
-  }
-
-  private openSanitarium(heroId?: string) {
-    this.openModal("Sanitarium of Calming Winds", (panel) => {
-      panel.add(
-        this.add
-          .text(
-            0,
-            0,
-            "Cleanse diseases and troubling quirks (60g, 20% failure).",
-            {
-              ...UI_FONT.body,
-              wordWrap: { width: 432 },
-            }
-          )
-          .setOrigin(0, 0)
-      );
-
-      let offset = 32;
-      const candidates = this.state.heroes.filter(
-        (hero) =>
-          hero.diseases.length > 0 ||
-          hero.traits.some((t) => t.category === "affliction")
-      );
-      if (!candidates.length) {
-        panel.add(
-          this.add
-            .text(0, offset, "No heroes require treatment.", UI_FONT.body)
-            .setOrigin(0, 0)
+          (_hero, innerOffset) => innerOffset
         );
         return;
       }
 
-      candidates.forEach((hero) => {
-        const afflictions = hero.diseases
-          .map((d) => d.name)
-          .concat(
-            hero.traits
-              .filter((t) => t.category === "affliction")
-              .map((t) => t.name)
-          )
-          .join(", ");
-        const btn = this.createButton(
+      if (this.playerProfile === undefined) {
+        const loading = this.add
+          .text(0, offset, "Loading player profile...", UI_FONT.body)
+          .setOrigin(0, 0);
+        panel.add(loading);
+        offset = loading.y + loading.height + 16;
+        this.renderHeroModalSection(
+          panel,
+          offset,
+          (_hero, innerOffset) => innerOffset
+        );
+        return;
+      }
+
+      if (this.playerProfile === null) {
+        const initBtn = createButton(
+          this,
           0,
           offset,
-          400,
-          `${hero.name} — ${afflictions}`,
-          () => {
-            const res = this.store.sanitizeHero(hero.id);
-            this.showToast(res.message || "");
-          }
+          260,
+          "Initialize Adventurer Ledger",
+          () => this.initializePlayerProfile(),
+          !this.programBusy
         );
-        if (heroId && hero.id === heroId) offset += 40;
-        panel.add(btn);
-        offset += 40;
-      });
-    });
-  }
+        panel.add(initBtn);
+        offset = initBtn.y + BUTTON_DIMENSIONS.height + 20;
+        this.renderHeroModalSection(
+          panel,
+          offset,
+          (_hero, innerOffset) => innerOffset
+        );
+        return;
+      }
 
-  private openBlacksmith(heroId?: string) {
-    this.openModal("Iron & Ember Forge", (panel) => {
-      panel.add(
-        this.add
-          .text(
-            0,
-            0,
-            "Temper steel to sharpen your blades and armor.",
-            UI_FONT.body
-          )
-          .setOrigin(0, 0)
+      if (!this.playerProfile) {
+        this.renderHeroModalSection(
+          panel,
+          offset,
+          (_hero, innerOffset) => innerOffset
+        );
+        return;
+      }
+
+      const profile = this.playerProfile;
+      const freeRemaining = Math.max(
+        0,
+        HERO_FREE_MINT_LIMIT - profile.freeMintCount
       );
+      const heroCapReached = profile.heroCount >= MAX_HEROES;
+      const mintLabel =
+        freeRemaining > 0
+          ? `Summon Hero (${freeRemaining} free left)`
+          : `Summon Hero (${HERO_PAID_COST} Gold)`;
+      const mintEnabled =
+        !heroCapReached && !this.programBusy && !this.heroesLoading;
 
-      let offset = 32;
-      this.state.heroes.forEach((hero) => {
-        const card = this.add.container(0, offset);
-
-        card.add(
-          this.add
-            .text(
-              0,
-              0,
-              `${hero.name} — Weapon ${hero.weaponLevel} • Armor ${hero.armorLevel}`,
-              {
-                ...UI_FONT.body,
-              }
-            )
-            .setOrigin(0, 0)
-        );
-
-        card.add(
-          this.createButton(
-            0,
-            26,
-            200,
-            `Upgrade Weapon (${50 * hero.weaponLevel}g)`,
-            () => {
-              const res = this.store.upgradeWeapon(hero.id);
-              this.showToast(res.message || "");
-            },
-            hero.weaponLevel < 5
-          )
-        );
-
-        card.add(
-          this.createButton(
-            220,
-            26,
-            200,
-            `Upgrade Armor (${50 * hero.armorLevel}g)`,
-            () => {
-              const res = this.store.upgradeArmor(hero.id);
-              this.showToast(res.message || "");
-            },
-            hero.armorLevel < 5
-          )
-        );
-
-        if (heroId && hero.id === heroId) offset += 76;
-        panel.add(card);
-        offset += 76;
-      });
-    });
-  }
-
-  private openGuild(heroId?: string) {
-    this.openModal("Adventurers' Guild", (panel) => {
-      panel.add(
-        this.add
-          .text(
-            0,
-            0,
-            "Learn new skills or refine current techniques.",
-            UI_FONT.body
-          )
-          .setOrigin(0, 0)
+      const mintBtn = createButton(
+        this,
+        0,
+        offset,
+        320,
+        mintLabel,
+        () => {
+          this.mintHero();
+        },
+        mintEnabled
       );
+      panel.add(mintBtn);
 
-      let offset = 28;
-      this.state.heroes.forEach((hero) => {
-        const heroHeader = this.add
+      const infoLines: string[] = [];
+      infoLines.push(`Next hero ID: ${profile.nextHeroId.toString()}`);
+      infoLines.push(`Roster: ${profile.heroCount}/${MAX_HEROES}`);
+      if (heroCapReached) {
+        infoLines.push("Roster is at capacity.");
+      } else if (freeRemaining > 0) {
+        infoLines.push(`${freeRemaining} free summons remaining.`);
+      } else {
+        infoLines.push("Further summons draw 100 gold from your vault.");
+      }
+
+      const infoText = infoLines.join("\n");
+      const info = this.add
+        .text(0, mintBtn.y + BUTTON_DIMENSIONS.height + 8, infoText, {
+          ...UI_FONT.caption,
+          color: "#9fa6c0",
+          wordWrap: { width: 432 },
+        })
+        .setOrigin(0, 0);
+      panel.add(info);
+
+      offset = info.y + info.height + 16;
+
+      this.renderHeroModalSection(panel, offset, (hero, innerOffset) => {
+        const block = this.add.container(0, innerOffset);
+        const typeLabel = getHeroTypeLabel(hero.heroType);
+        const title = this.add
+          .text(0, 0, `Hero #${hero.id} — ${typeLabel}`, {
+            ...UI_FONT.body,
+            color: "#f4f6ff",
+          })
+          .setOrigin(0, 0);
+        block.add(title);
+
+        const details = this.add
           .text(
             0,
-            offset,
-            `${hero.name} — active ${hero.activeSkillIds.length}/${MAX_ACTIVE_SKILLS}`,
+            title.height + 4,
+            `Level ${hero.level} • Soulbound: ${
+              hero.isSoulbound ? "Yes" : "No"
+            }`,
             {
-              ...UI_FONT.body,
-              color: "#f4f6ff",
+              ...UI_FONT.caption,
+              color: "#c1c6db",
             }
           )
           .setOrigin(0, 0);
-        panel.add(heroHeader);
-        offset += 20;
+        block.add(details);
 
-        hero.skills.forEach((skill) => {
-          const row = this.add.container(0, offset);
-          const owned = skill.owned;
-          row.add(
-            this.add
-              .text(0, 0, `${skill.name} Lv ${skill.level}/${skill.maxLevel}`, {
-                ...UI_FONT.caption,
-                color: owned ? "#9ac6ff" : "#7a8094",
-              })
-              .setOrigin(0, 0)
-          );
+        const minted = this.add
+          .text(
+            0,
+            details.y + details.height + 2,
+            `Minted ${formatHeroTimestamp(hero.mintTimestamp)}`,
+            {
+              ...UI_FONT.caption,
+              color: "#9fa6c0",
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(minted);
 
-          if (!owned) {
-            row.add(
-              this.createButton(220, -4, 150, "Learn (75g)", () => {
-                const res = this.store.learnSkill(hero.id, skill.id);
-                this.showToast(res.message || "");
-              })
-            );
-          } else if (skill.level < skill.maxLevel) {
-            row.add(
-              this.createButton(
-                220,
-                -4,
-                150,
-                `Upgrade (${40 * (skill.level + 1)}g)`,
-                () => {
-                  const res = this.store.upgradeSkill(hero.id, skill.id);
-                  this.showToast(res.message || "");
-                }
-              )
-            );
+        panel.add(block);
+        const blockHeight = minted.y + minted.height;
+        return innerOffset + blockHeight + 18;
+      });
+    });
+  }
+
+  private openSanitarium() {
+    this.openModal("Sanitarium of Calming Winds", (panel) => {
+      const intro = this.add
+        .text(
+          0,
+          0,
+          "Track and remedy persistent afflictions from your on-chain roster.",
+          {
+            ...UI_FONT.body,
+            wordWrap: { width: 432 },
           }
+        )
+        .setOrigin(0, 0);
+      panel.add(intro);
 
-          const active = hero.activeSkillIds.includes(skill.id);
-          row.add(
-            this.createButton(
-              380,
-              -4,
-              90,
-              active ? "Active" : "Activate",
-              () => {
-                const next = active
-                  ? hero.activeSkillIds.filter((id) => id !== skill.id)
-                  : hero.activeSkillIds.length >= MAX_ACTIVE_SKILLS
-                  ? hero.activeSkillIds.slice(1).concat(skill.id)
-                  : [...hero.activeSkillIds, skill.id];
-                const res = this.store.setActiveSkills(hero.id, next);
-                this.showToast(res.message || "");
-              },
-              owned
+      this.renderHeroModalSection(panel, intro.height + 16, (hero, offset) => {
+        const ailments = hero.negativeQuirks.map((id) => getQuirkLabel(id));
+        const summary =
+          ailments.length > 0
+            ? ailments.join(", ")
+            : "No negative traits detected.";
+
+        const block = this.add.container(0, offset);
+        const header = this.add
+          .text(0, 0, `Hero #${hero.id}`, {
+            ...UI_FONT.body,
+            color: "#f4f6ff",
+          })
+          .setOrigin(0, 0);
+        block.add(header);
+
+        const detail = this.add
+          .text(0, header.height + 4, summary, {
+            ...UI_FONT.caption,
+            color: ailments.length ? "#ff9d7d" : "#9fa6c0",
+            wordWrap: { width: 432 },
+          })
+          .setOrigin(0, 0);
+        block.add(detail);
+
+        panel.add(block);
+        const blockHeight = detail.y + detail.height;
+        return offset + blockHeight + 16;
+      });
+    });
+  }
+
+  private openBlacksmith() {
+    this.openModal("Iron & Ember Forge", (panel) => {
+      const intro = this.add
+        .text(
+          0,
+          0,
+          "Review your heroes' combat readiness. Attack, defense, and arcane focus are drawn directly from the on-chain mint.",
+          {
+            ...UI_FONT.body,
+            wordWrap: { width: 432 },
+          }
+        )
+        .setOrigin(0, 0);
+      panel.add(intro);
+
+      this.renderHeroModalSection(panel, intro.height + 16, (hero, offset) => {
+        const block = this.add.container(0, offset);
+
+        const header = this.add
+          .text(0, 0, `Hero #${hero.id} — ${getHeroTypeLabel(hero.heroType)}`, {
+            ...UI_FONT.body,
+            color: "#f4f6ff",
+          })
+          .setOrigin(0, 0);
+        block.add(header);
+
+        const offense = this.add
+          .text(
+            0,
+            header.height + 4,
+            `Attack ${hero.attack} • Magic ${hero.magic} • Speed ${hero.speed}`,
+            {
+              ...UI_FONT.caption,
+              color: "#c1c6db",
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(offense);
+
+        const defense = this.add
+          .text(
+            0,
+            offense.y + offense.height + 2,
+            `Defense ${hero.defense} • Resistance ${hero.resistance} • Luck ${hero.luck}`,
+            {
+              ...UI_FONT.caption,
+              color: "#c1c6db",
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(defense);
+
+        panel.add(block);
+        const blockHeight = defense.y + defense.height;
+        return offset + blockHeight + 16;
+      });
+    });
+  }
+
+  private openGuild() {
+    this.openModal("Adventurers' Guild", (panel) => {
+      const intro = this.add
+        .text(
+          0,
+          0,
+          "Guild archivists keep record of each hero's signature abilities.",
+          {
+            ...UI_FONT.body,
+            wordWrap: { width: 432 },
+          }
+        )
+        .setOrigin(0, 0);
+      panel.add(intro);
+
+      this.renderHeroModalSection(panel, intro.height + 16, (hero, offset) => {
+        const block = this.add.container(0, offset);
+        const header = this.add
+          .text(0, 0, `Hero #${hero.id} — ${getHeroTypeLabel(hero.heroType)}`, {
+            ...UI_FONT.body,
+            color: "#f4f6ff",
+          })
+          .setOrigin(0, 0);
+        block.add(header);
+
+        const skills =
+          hero.skills
+            .map((skill) => skill.name || `Skill ${skill.id}`)
+            .join(", ") || "Unrevealed";
+        const body = this.add
+          .text(0, header.height + 4, skills, {
+            ...UI_FONT.caption,
+            color: "#c1c6db",
+            wordWrap: { width: 432 },
+          })
+          .setOrigin(0, 0);
+        block.add(body);
+
+        const nextLevel = getNextLevelRequirement(hero);
+        const requirementLabel = nextLevel
+          ? `Next: Level ${nextLevel.targetLevel} (XP > ${nextLevel.requiredExperience})`
+          : "Maximum level reached";
+        const requirementText = this.add
+          .text(0, body.y + body.height + 6, requirementLabel, {
+            ...UI_FONT.caption,
+            color: nextLevel ? "#9fa6c0" : "#6f758c",
+          })
+          .setOrigin(0, 0);
+        block.add(requirementText);
+
+        const pending = hero.pendingRequest !== 0;
+        let blockBottom = requirementText.y + requirementText.height;
+        if (pending) {
+          const pendingText = this.add
+            .text(
+              0,
+              requirementText.y + requirementText.height + 4,
+              "Awaiting VRF settlement...",
+              {
+                ...UI_FONT.caption,
+                color: "#ffb878",
+              }
             )
+            .setOrigin(0, 0);
+          block.add(pendingText);
+          blockBottom = pendingText.y + pendingText.height;
+        } else if (nextLevel) {
+          const levelButton = createButton(
+            this,
+            292,
+            requirementText.y - 4,
+            140,
+            "Level Up",
+            () => this.levelUpHero(hero),
+            canLevelUpHero(hero)
           );
+          block.add(levelButton);
+          blockBottom = Math.max(
+            blockBottom,
+            levelButton.y + BUTTON_DIMENSIONS.height
+          );
+        }
 
-          panel.add(row);
-          offset += 32;
-        });
-
-        offset += 12;
-        if (heroId && hero.id === heroId) offset += 12;
+        panel.add(block);
+        const blockHeight = blockBottom;
+        return offset + blockHeight + 16;
       });
     });
   }
@@ -1373,7 +1595,8 @@ export class TownScene extends Phaser.Scene {
         );
 
         panel.add(
-          this.createButton(
+          createButton(
+            this,
             240,
             offset - 6,
             110,
@@ -1385,7 +1608,8 @@ export class TownScene extends Phaser.Scene {
           )
         );
         panel.add(
-          this.createButton(
+          createButton(
+            this,
             360,
             offset - 6,
             110,
@@ -1402,39 +1626,48 @@ export class TownScene extends Phaser.Scene {
     });
   }
 
-  private openAbbey(heroId?: string) {
+  private openAbbey() {
     this.openModal("Abbey of the Dawn", (panel) => {
-      panel.add(
-        this.add
-          .text(
-            0,
-            0,
-            "Meditate to reduce stress or purchase a holy blessing.",
-            UI_FONT.body
-          )
-          .setOrigin(0, 0)
-      );
+      const intro = this.add
+        .text(
+          0,
+          0,
+          "A quiet refuge where heroes reflect on virtues earned. Review positive traits and blessings sourced from the chain.",
+          {
+            ...UI_FONT.body,
+            wordWrap: { width: 432 },
+          }
+        )
+        .setOrigin(0, 0);
+      panel.add(intro);
 
-      let offset = 26;
-      this.state.heroes.forEach((hero) => {
-        const label = `${hero.name} — stress ${hero.stress}%`;
+      this.renderHeroModalSection(panel, intro.height + 16, (hero, offset) => {
+        const block = this.add.container(0, offset);
+        const header = this.add
+          .text(0, 0, `Hero #${hero.id}`, {
+            ...UI_FONT.body,
+            color: "#f4f6ff",
+          })
+          .setOrigin(0, 0);
+        block.add(header);
 
-        panel.add(
-          this.createButton(0, offset, 220, label, () => {
-            const res = this.store.applyAbbey([hero.id], { stressRelief: 25 });
-            this.showToast(res.message || "");
+        const virtues = hero.positiveQuirks
+          .map((id) => getQuirkLabel(id))
+          .join(", ");
+        const text = virtues || "No virtues recorded yet.";
+
+        const body = this.add
+          .text(0, header.height + 4, text, {
+            ...UI_FONT.caption,
+            color: virtues ? "#8de9a3" : "#9fa6c0",
+            wordWrap: { width: 432 },
           })
-        );
-        panel.add(
-          this.createButton(240, offset, 180, "Blessing (45g)", () => {
-            const res = this.store.applyAbbey([hero.id], {
-              stressRelief: 10,
-              blessing: true,
-            });
-            this.showToast(res.message || "");
-          })
-        );
-        offset += 38;
+          .setOrigin(0, 0);
+        block.add(body);
+
+        panel.add(block);
+        const blockHeight = body.y + body.height;
+        return offset + blockHeight + 16;
       });
     });
   }
@@ -1473,14 +1706,24 @@ export class TownScene extends Phaser.Scene {
         })
         .setOrigin(0.5, 0)
     );
-    const resume = this.createButton(-80, 40, 160, "Resume", () =>
+    const resume = createButton(this, -80, 40, 160, "Resume", () =>
       this.handleEsc()
     );
     this.pauseOverlay.add(resume);
   }
 
   private launchEmbark() {
-    this.scene.launch("EmbarkScene");
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+
+    this.scene.launch("EmbarkScene", {
+      heroes: [...this.heroes],
+      heroesLoading: this.heroesLoading,
+      heroLoadError: this.heroLoadError,
+      walletAddress: this.walletAddress,
+    });
     this.scene.pause();
   }
 
@@ -1528,8 +1771,4 @@ export class TownScene extends Phaser.Scene {
     });
     this.keyboardBindings = [];
   }
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
 }

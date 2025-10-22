@@ -1,12 +1,19 @@
 import Phaser from "phaser";
-import { townStore } from "../state/townStore";
 import {
-  CommunityDungeon,
-  CustomDungeon,
-  Hero,
-  ItemId,
-  TownState,
-} from "../state/models";
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  clusterApiUrl,
+} from "@solana/web3.js";
+import { townStore } from "../state/townStore";
+import { ItemId, TownState, HeroClass } from "../state/models";
+import { ChainHero, getHeroTypeLabel } from "../state/heroChain";
+import {
+  ChainDungeon,
+  createMintDungeonInstruction,
+  fetchOwnedDungeonAccounts,
+} from "../state/dungeonChain";
 import {
   SAFE_MARGIN,
   UI_FONT,
@@ -16,35 +23,63 @@ import {
 } from "../ui/uiConfig";
 import { setInventoryVisible } from "../ui/hudControls";
 
-type SelectedDungeon =
-  | { source: "custom"; dungeon: CustomDungeon }
-  | { source: "community"; dungeon: CommunityDungeon };
+type SelectedDungeon = { source: "my" | "community"; dungeon: ChainDungeon };
 
-type CommunityFilters = {
-  difficultyMin: number;
-  difficultyMax: number;
-  search: string;
-  page: number;
+const FOOTER_HEIGHT = 220;
+const CARD_WIDTH = 620;
+
+type HeroRosterSnapshot = {
+  heroes: ChainHero[];
+  heroesLoading: boolean;
+  heroLoadError?: string;
+  walletAddress?: string;
 };
 
-const FOOTER_HEIGHT = 200;
-const CARD_WIDTH = 620;
+type EmbarkSceneLaunchData = Partial<HeroRosterSnapshot>;
+
+type WalletPublicKey = {
+  toBase58(): string;
+  toString(): string;
+};
+
+type SolanaEventHandler = (...args: unknown[]) => void;
+
+type SolanaProvider = {
+  isPhantom?: boolean;
+  publicKey?: WalletPublicKey | null;
+  connect(options?: {
+    onlyIfTrusted?: boolean;
+  }): Promise<{ publicKey: WalletPublicKey } | void>;
+  disconnect(): Promise<void>;
+  on?(event: string, handler: SolanaEventHandler): void;
+  off?(event: string, handler: SolanaEventHandler): void;
+  removeListener?(event: string, handler: SolanaEventHandler): void;
+  request?(args: { method: string; params?: unknown[] }): Promise<unknown>;
+  signAndSendTransaction?: (
+    tx: Transaction
+  ) => Promise<{ signature: string } | string>;
+  signTransaction?: (tx: Transaction) => Promise<Transaction>;
+};
 
 export class EmbarkScene extends Phaser.Scene {
   private store = townStore;
   private state!: TownState;
   private unsubChange?: () => void;
 
-  private activeTab: "create" | "community" = "create";
+  private activeTab: "my" | "community" = "my";
   private selectedDungeon?: SelectedDungeon;
-  private partySelection = new Set<string>();
-  private communityFilters: CommunityFilters = {
-    difficultyMin: 1,
-    difficultyMax: 5,
-    search: "",
-    page: 0,
-  };
-  private communityPool: CommunityDungeon[] = townStore.getCommunityDungeons();
+  private chainHeroes: ChainHero[] = [];
+  private heroesLoading = false;
+  private heroLoadError?: string;
+  private walletAddress?: string;
+  private partySelection: Set<string> = new Set();
+  private myDungeons: ChainDungeon[] = [];
+  private communityDungeons: ChainDungeon[] = [];
+  private dungeonsLoading = false;
+  private dungeonLoadError?: string;
+  private dungeonProgramBusy = false;
+  private walletProvider?: SolanaProvider;
+  private solanaConnection?: Connection;
 
   private safe = SAFE_MARGIN;
   private contentWidth = 0;
@@ -79,8 +114,17 @@ export class EmbarkScene extends Phaser.Scene {
     super("EmbarkScene");
   }
 
-  init() {
+  init(data?: EmbarkSceneLaunchData) {
     this.state = this.store.getState();
+    const snapshot = this.registry.get("town:heroRoster") as
+      | HeroRosterSnapshot
+      | undefined;
+    if (snapshot) {
+      this.applyRosterSnapshot(snapshot);
+    }
+    if (data) {
+      this.applyRosterSnapshot(data);
+    }
   }
 
   create() {
@@ -89,8 +133,28 @@ export class EmbarkScene extends Phaser.Scene {
     const hideInventory = () => setInventoryVisible(false);
     hideInventory();
     this.events.on(Phaser.Scenes.Events.RESUME, hideInventory);
+    this.registry.events.on(
+      "setdata-town:heroRoster",
+      this.onRosterDataEvent,
+      this
+    );
+    this.registry.events.on(
+      "changedata-town:heroRoster",
+      this.onRosterDataEvent,
+      this
+    );
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off(Phaser.Scenes.Events.RESUME, hideInventory);
+      this.registry.events.off(
+        "setdata-town:heroRoster",
+        this.onRosterDataEvent,
+        this
+      );
+      this.registry.events.off(
+        "changedata-town:heroRoster",
+        this.onRosterDataEvent,
+        this
+      );
       this.releaseKeyboardBindings();
     });
 
@@ -108,6 +172,7 @@ export class EmbarkScene extends Phaser.Scene {
     this.bindKey("keydown-TAB", () => this.toggleTab());
 
     this.refresh();
+    void this.loadDungeons();
   }
 
   shutdown() {
@@ -133,35 +198,43 @@ export class EmbarkScene extends Phaser.Scene {
     );
     g.destroy();
 
+    const backWidth = 112;
+    this.createSmallButton(this.safe, this.safe + 12, backWidth, "← Back", () =>
+      this.exit()
+    );
+
     this.add
-      .text(this.safe, this.safe + 12, "Embark Planner", UI_FONT.title)
+      .text(
+        this.safe + backWidth + 16,
+        this.safe + 12,
+        "Embark Planner",
+        UI_FONT.title
+      )
       .setOrigin(0, 0);
   }
 
   private renderHeader() {
-    const tabY = this.safe + 58;
+    const tabY = this.safe + 72;
     const tabSpacing = 12;
     const buttonWidth = 176;
 
-    const createBtn = this.createTabButton(
+    const myBtn = this.createTabButton(
       this.safe,
       tabY,
       buttonWidth,
-      "Create Dungeon",
-      () => this.switchTab("create")
+      "My Dungeons",
+      "my"
     );
     const communityBtn = this.createTabButton(
       this.safe + buttonWidth + tabSpacing,
       tabY,
       buttonWidth,
       "Community Dungeons",
-      () => this.switchTab("community")
+      "community"
     );
 
-    createBtn.setFillStyle(
-      this.activeTab === "create"
-        ? PANEL_COLORS.highlight
-        : PANEL_COLORS.disabled
+    myBtn.setFillStyle(
+      this.activeTab === "my" ? PANEL_COLORS.highlight : PANEL_COLORS.disabled
     );
     communityBtn.setFillStyle(
       this.activeTab === "community"
@@ -175,7 +248,7 @@ export class EmbarkScene extends Phaser.Scene {
     y: number,
     width: number,
     label: string,
-    handler: () => void
+    tab: "my" | "community"
   ) {
     const button = this.add
       .rectangle(
@@ -191,14 +264,12 @@ export class EmbarkScene extends Phaser.Scene {
     button
       .on("pointerover", () => button.setFillStyle(PANEL_COLORS.highlight))
       .on("pointerout", () => {
-        const active =
-          (label.startsWith("Create") && this.activeTab === "create") ||
-          (label.startsWith("Community") && this.activeTab === "community");
+        const active = this.activeTab === tab;
         button.setFillStyle(
           active ? PANEL_COLORS.highlight : PANEL_COLORS.disabled
         );
       })
-      .on("pointerdown", handler);
+      .on("pointerdown", () => this.switchTab(tab));
 
     this.add
       .text(button.x + width / 2, button.y, label, {
@@ -283,12 +354,13 @@ export class EmbarkScene extends Phaser.Scene {
     this.footer?.destroy();
     this.footerPartyMask?.destroy();
     this.footerPartyMaskRect?.destroy();
+    this.footerPartyMask = undefined;
+    this.footerPartyMaskRect = undefined;
     if (this.footerWheelHandler) {
       this.input.off("wheel", this.footerWheelHandler, this);
       this.footerWheelHandler = undefined;
     }
 
-    const FOOTER_HEIGHT = 220; // keep your constant if it lives elsewhere
     const PARTY_COL_WIDTH = 280;
     const COL_GAP = 32;
     const PADDING_X = 16;
@@ -342,63 +414,104 @@ export class EmbarkScene extends Phaser.Scene {
     this.footerPartyList = partyList;
 
     let partyY = 0;
-    this.state.heroes.forEach((hero) => {
-      const selected = this.partySelection.has(hero.id);
-      const button = this.createFooterChip(
-        0,
-        partyY,
-        PARTY_COL_WIDTH,
-        `${hero.name} (${hero.cls})`,
-        () => this.toggleHero(hero.id),
-        selected
-      );
-      partyList.add(button);
-      partyY += BUTTON_DIMENSIONS.height + 6;
-    });
-
-    // Mask for the visible area
-    this.footerPartyMaskRect = this.add.rectangle(
-      this.footer.x + PADDING_X + viewportW / 2,
-      this.footer.y + PADDING_Y + listY + visibleH / 2,
-      viewportW,
-      visibleH,
-      0xffffff,
-      0
-    );
-    this.footerPartyMask = this.footerPartyMaskRect.createGeometryMask();
-    partyList.setMask(this.footerPartyMask);
-
-    // Enable wheel scrolling only when overflow
-    const contentH = Math.max(0, partyY);
-    let partyScroll = 0;
-
-    const applyPartyScroll = () => {
-      const maxScroll = Math.max(0, contentH - visibleH);
-      if (maxScroll <= 0) {
-        partyScroll = 0;
-      } else {
-        partyScroll = Phaser.Math.Clamp(partyScroll, -maxScroll, 0);
-      }
-      partyList.y = listY + partyScroll;
+    const addPartyMessage = (text: string, color = "#9fa6c0") => {
+      const message = this.add
+        .text(0, listY, text, {
+          ...UI_FONT.caption,
+          color,
+          wordWrap: { width: PARTY_COL_WIDTH },
+        })
+        .setOrigin(0, 0);
+      partyCol.add(message);
     };
-    applyPartyScroll();
 
-    if (contentH > visibleH) {
-      this.footerWheelHandler = (pointer, _objects, _dx, dy, _dz) => {
-        // Test pointer inside the party viewport
-        const px = pointer.worldX ?? pointer.x;
-        const py = pointer.worldY ?? pointer.y;
-        const rect = new Phaser.Geom.Rectangle(
-          this.footer!.x + PADDING_X,
-          this.footer!.y + PADDING_Y + listY,
-          viewportW,
-          visibleH
+    if (!this.walletAddress) {
+      addPartyMessage("Connect your wallet in town to choose on-chain heroes.");
+      partyList.destroy();
+      this.footerPartyList = undefined;
+      this.footerPartyMask = undefined;
+      this.footerPartyMaskRect = undefined;
+    } else if (this.heroesLoading) {
+      addPartyMessage("Loading heroes from the chain...");
+      partyList.destroy();
+      this.footerPartyList = undefined;
+      this.footerPartyMask = undefined;
+      this.footerPartyMaskRect = undefined;
+    } else if (this.heroLoadError) {
+      addPartyMessage(
+        `Unable to load heroes: ${this.heroLoadError}`,
+        "#ff8a8a"
+      );
+      partyList.destroy();
+      this.footerPartyList = undefined;
+      this.footerPartyMask = undefined;
+      this.footerPartyMaskRect = undefined;
+    } else if (!this.chainHeroes.length) {
+      addPartyMessage(
+        "No on-chain heroes yet. Summon allies in town to build your roster."
+      );
+      partyList.destroy();
+      this.footerPartyList = undefined;
+      this.footerPartyMask = undefined;
+      this.footerPartyMaskRect = undefined;
+    } else {
+      this.chainHeroes.forEach((hero) => {
+        const key = this.heroKey(hero);
+        const selected = this.partySelection.has(key);
+        const button = this.createFooterChip(
+          0,
+          partyY,
+          PARTY_COL_WIDTH,
+          `Hero #${hero.id} (${getHeroTypeLabel(hero.heroType)})`,
+          () => this.toggleHero(key),
+          selected
         );
-        if (!rect.contains(px, py)) return;
-        partyScroll -= dy * 0.5;
-        applyPartyScroll();
+        partyList.add(button);
+        partyY += BUTTON_DIMENSIONS.height + 6;
+      });
+
+      this.footerPartyMaskRect = this.add.rectangle(
+        this.footer.x + PADDING_X + viewportW / 2,
+        this.footer.y + PADDING_Y + listY + visibleH / 2,
+        viewportW,
+        visibleH,
+        0xffffff,
+        0
+      );
+      this.footerPartyMask = this.footerPartyMaskRect.createGeometryMask();
+      partyList.setMask(this.footerPartyMask);
+
+      // Enable wheel scrolling only when overflow
+      const contentH = Math.max(0, partyY);
+      let partyScroll = 0;
+
+      const applyPartyScroll = () => {
+        const maxScroll = Math.max(0, contentH - visibleH);
+        if (maxScroll <= 0) {
+          partyScroll = 0;
+        } else {
+          partyScroll = Phaser.Math.Clamp(partyScroll, -maxScroll, 0);
+        }
+        partyList.y = listY + partyScroll;
       };
-      this.input.on("wheel", this.footerWheelHandler, this);
+      applyPartyScroll();
+
+      if (contentH > visibleH) {
+        this.footerWheelHandler = (pointer, _objects, _dx, dy, _dz) => {
+          const px = pointer.worldX ?? pointer.x;
+          const py = pointer.worldY ?? pointer.y;
+          const rect = new Phaser.Geom.Rectangle(
+            this.footer!.x + PADDING_X,
+            this.footer!.y + PADDING_Y + listY,
+            viewportW,
+            visibleH
+          );
+          if (!rect.contains(px, py)) return;
+          partyScroll -= dy * 0.5;
+          applyPartyScroll();
+        };
+        this.input.on("wheel", this.footerWheelHandler, this);
+      }
     }
 
     // === Supplies column ===
@@ -447,14 +560,20 @@ export class EmbarkScene extends Phaser.Scene {
   }
 
   private refresh() {
-    this.selectedDungeon =
-      this.selectedDungeon?.source === "custom"
-        ? this.state.customDungeons.find(
-            (d) => d.id === this.selectedDungeon?.dungeon.id
-          )
-          ? this.selectedDungeon
-          : undefined
-        : this.selectedDungeon;
+    if (this.selectedDungeon) {
+      const pool =
+        this.selectedDungeon.source === "my"
+          ? this.myDungeons
+          : this.communityDungeons;
+      const match = pool.find(
+        (dungeon) =>
+          dungeon.publicKey === this.selectedDungeon!.dungeon.publicKey
+      );
+      this.selectedDungeon = match
+        ? { source: this.selectedDungeon.source, dungeon: match }
+        : undefined;
+    }
+
     this.buildTabContent();
     this.renderFooter();
   }
@@ -463,10 +582,10 @@ export class EmbarkScene extends Phaser.Scene {
     this.contentRoot.removeAll(true);
     let offset = 0;
 
-    if (this.activeTab === "create") {
-      offset = this.buildCreateTab(offset);
+    if (this.activeTab === "my") {
+      offset = this.buildMyDungeonsTab(offset);
     } else {
-      offset = this.buildCommunityTab(offset);
+      offset = this.buildCommunityDungeonsTab(offset);
     }
 
     this.contentScrollMax = Math.max(0, offset - this.contentHeight + 16);
@@ -474,59 +593,107 @@ export class EmbarkScene extends Phaser.Scene {
     this.updateContentScroll();
   }
 
-  private buildCreateTab(offset: number) {
-    const max = 3;
+  private buildMyDungeonsTab(offset: number) {
     this.contentRoot.add(
-      this.add
-        .text(0, offset, "Your custom dungeons", UI_FONT.body)
-        .setOrigin(0, 0)
+      this.add.text(0, offset, "My dungeons", UI_FONT.body).setOrigin(0, 0)
     );
+    const mintLabel = this.dungeonProgramBusy ? "Minting..." : "Mint Dungeon";
     this.contentRoot.add(
       this.createSmallButton(
         CARD_WIDTH - 140,
         offset - 6,
         140,
-        "Create Dungeon",
-        () => this.promptCreateDungeon(),
-        this.state.customDungeons.length < max
+        mintLabel,
+        () => this.mintDungeon(),
+        Boolean(this.walletAddress) &&
+          !this.dungeonProgramBusy &&
+          !this.dungeonsLoading
       )
     );
     offset += 32;
 
-    if (this.state.customDungeons.length === 0) {
+    if (!this.walletAddress) {
       this.contentRoot.add(
         this.add
-          .text(0, offset, "You have no custom dungeons yet.", UI_FONT.caption)
+          .text(
+            0,
+            offset,
+            "Connect your wallet in town to mint dungeons on-chain.",
+            UI_FONT.caption
+          )
           .setOrigin(0, 0)
       );
       return offset + 24;
     }
 
-    this.state.customDungeons.forEach((dungeon) => {
+    if (this.dungeonsLoading) {
+      this.contentRoot.add(
+        this.add
+          .text(
+            0,
+            offset,
+            "Loading your dungeons from the chain...",
+            UI_FONT.caption
+          )
+          .setOrigin(0, 0)
+      );
+      return offset + 24;
+    }
+
+    if (this.dungeonLoadError) {
+      this.contentRoot.add(
+        this.add
+          .text(
+            0,
+            offset,
+            `Failed to load dungeons: ${this.dungeonLoadError}`,
+            {
+              ...UI_FONT.caption,
+              color: "#ff8a8a",
+              wordWrap: { width: CARD_WIDTH },
+            }
+          )
+          .setOrigin(0, 0)
+      );
+      this.contentRoot.add(
+        this.createSmallButton(CARD_WIDTH - 120, offset - 4, 120, "Retry", () =>
+          this.loadDungeons(true)
+        )
+      );
+      return offset + 44;
+    }
+
+    const owned = [...this.myDungeons].sort((a, b) => a.mintId - b.mintId);
+    if (!owned.length) {
+      this.contentRoot.add(
+        this.add
+          .text(
+            0,
+            offset,
+            "No dungeons minted yet. Use the button above to summon one.",
+            UI_FONT.caption
+          )
+          .setOrigin(0, 0)
+      );
+      return offset + 24;
+    }
+
+    owned.forEach((dungeon) => {
       const card = this.buildDungeonCard(
-        dungeon.name,
-        dungeon.description,
-        dungeon.difficulty,
-        dungeon.seed,
+        dungeon.metadata.name || `Dungeon #${dungeon.mintId}`,
+        `Size ${dungeon.gridWidth}×${dungeon.gridHeight} • Seed ${dungeon.seed}`,
+        this.estimateDifficulty(dungeon),
+        String(dungeon.seed),
         [
           {
-            label: "Select",
-            handler: () => this.selectDungeon({ source: "custom", dungeon }),
-            enabled: true,
-          },
-          {
-            label: "Edit",
-            handler: () => this.promptEditDungeon(dungeon),
-            enabled: true,
-          },
-          {
-            label: "Delete",
-            handler: () => this.deleteDungeon(dungeon),
-            enabled: true,
+            label: dungeon.status === "ready" ? "Select" : "Awaiting VRF",
+            handler: () => this.selectDungeon({ source: "my", dungeon }),
+            enabled: dungeon.status === "ready",
           },
         ],
-        this.selectedDungeon?.source === "custom" &&
-          this.selectedDungeon.dungeon.id === dungeon.id
+        this.selectedDungeon?.source === "my" &&
+          this.selectedDungeon.dungeon.publicKey === dungeon.publicKey,
+        `Mint #${dungeon.mintId} • Status ${dungeon.status.toUpperCase()}`
       );
       card.y = offset;
       this.contentRoot.add(card);
@@ -536,53 +703,62 @@ export class EmbarkScene extends Phaser.Scene {
     return offset;
   }
 
-  private buildCommunityTab(offset: number) {
+  private buildCommunityDungeonsTab(offset: number) {
     this.contentRoot.add(
       this.add
-        .text(0, offset, "Browse community dungeons", UI_FONT.body)
+        .text(0, offset, "Community dungeons", UI_FONT.body)
         .setOrigin(0, 0)
     );
-    offset += 28;
-
-    const filtersRow = this.add.container(0, offset);
-    filtersRow.add(
+    this.contentRoot.add(
       this.createSmallButton(
-        0,
-        0,
-        160,
-        `Difficulty: ${this.communityFilters.difficultyMin}–${this.communityFilters.difficultyMax}`,
-        () => this.promptDifficultyFilter()
+        CARD_WIDTH - 120,
+        offset - 6,
+        120,
+        "Refresh",
+        () => this.loadDungeons(true),
+        !this.dungeonsLoading
       )
     );
-    filtersRow.add(
-      this.createSmallButton(172, 0, 120, "Search", () => this.promptSearch())
-    );
-    filtersRow.add(
-      this.createSmallButton(296, 0, 120, "Reset", () => this.resetFilters())
-    );
-    this.contentRoot.add(filtersRow);
-    offset += 40;
+    offset += 32;
 
-    const filtered = this.applyCommunityFilters();
-    const perPage = 4;
-    const pages = Math.max(1, Math.ceil(filtered.length / perPage));
-    this.communityFilters.page = clamp(
-      this.communityFilters.page,
-      0,
-      pages - 1
-    );
-    const pageItems = filtered.slice(
-      this.communityFilters.page * perPage,
-      this.communityFilters.page * perPage + perPage
-    );
+    if (this.dungeonsLoading) {
+      this.contentRoot.add(
+        this.add
+          .text(0, offset, "Loading community dungeons...", UI_FONT.caption)
+          .setOrigin(0, 0)
+      );
+      return offset + 24;
+    }
 
-    if (!pageItems.length) {
+    if (this.dungeonLoadError) {
       this.contentRoot.add(
         this.add
           .text(
             0,
             offset,
-            "No dungeons match the current filters.",
+            `Failed to load community dungeons: ${this.dungeonLoadError}`,
+            {
+              ...UI_FONT.caption,
+              color: "#ff8a8a",
+              wordWrap: { width: CARD_WIDTH },
+            }
+          )
+          .setOrigin(0, 0)
+      );
+      return offset + 36;
+    }
+
+    const available = this.communityDungeons
+      .filter((d) => d.status === "ready")
+      .sort((a, b) => a.mintId - b.mintId);
+
+    if (!available.length) {
+      this.contentRoot.add(
+        this.add
+          .text(
+            0,
+            offset,
+            "No community dungeons available yet. Check back soon!",
             UI_FONT.caption
           )
           .setOrigin(0, 0)
@@ -590,12 +766,12 @@ export class EmbarkScene extends Phaser.Scene {
       return offset + 24;
     }
 
-    pageItems.forEach((dungeon) => {
+    available.forEach((dungeon) => {
       const card = this.buildDungeonCard(
-        dungeon.name,
-        dungeon.description,
-        dungeon.difficulty,
-        dungeon.seed,
+        dungeon.metadata.name || `Dungeon #${dungeon.mintId}`,
+        `Size ${dungeon.gridWidth}×${dungeon.gridHeight}`,
+        this.estimateDifficulty(dungeon),
+        String(dungeon.seed),
         [
           {
             label: "Select",
@@ -604,61 +780,15 @@ export class EmbarkScene extends Phaser.Scene {
           },
         ],
         this.selectedDungeon?.source === "community" &&
-          this.selectedDungeon.dungeon.id === dungeon.id,
-        `Likes ${dungeon.likes}  •  by ${dungeon.author}`
+          this.selectedDungeon.dungeon.publicKey === dungeon.publicKey,
+        `Mint #${dungeon.mintId} • Owner ${this.shortenAddress(dungeon.owner)}`
       );
       card.y = offset;
       this.contentRoot.add(card);
       offset += 126;
     });
 
-    const pager = this.add.container(0, offset);
-    pager.add(
-      this.createSmallButton(
-        0,
-        0,
-        96,
-        "Previous",
-        () => {
-          this.communityFilters.page = clamp(
-            this.communityFilters.page - 1,
-            0,
-            pages - 1
-          );
-          this.refresh();
-        },
-        this.communityFilters.page > 0
-      )
-    );
-    pager.add(
-      this.createSmallButton(
-        112,
-        0,
-        96,
-        "Next",
-        () => {
-          this.communityFilters.page = clamp(
-            this.communityFilters.page + 1,
-            0,
-            pages - 1
-          );
-          this.refresh();
-        },
-        this.communityFilters.page < pages - 1
-      )
-    );
-    pager.add(
-      this.add
-        .text(
-          232,
-          4,
-          `Page ${this.communityFilters.page + 1} / ${pages}`,
-          UI_FONT.caption
-        )
-        .setOrigin(0, 0)
-    );
-    this.contentRoot.add(pager);
-    return offset + 36;
+    return offset;
   }
 
   private buildDungeonCard(
@@ -677,9 +807,7 @@ export class EmbarkScene extends Phaser.Scene {
     bg.setStrokeStyle(2, selected ? 0x5d8bff : 0x2f3443, 1);
     container.add(bg);
 
-    container.add(
-      this.add.text(16, 12, name, UI_FONT.body).setOrigin(0, 0)
-    );
+    container.add(this.add.text(16, 12, name, UI_FONT.body).setOrigin(0, 0));
     container.add(
       this.add
         .text(16, 34, `Difficulty ${difficulty}  Seed ${seed}`, UI_FONT.caption)
@@ -832,7 +960,74 @@ export class EmbarkScene extends Phaser.Scene {
       progress * (track - thumbHeight);
   }
 
+  private onRosterDataEvent(
+    _parent: Phaser.Data.DataManager,
+    _key: string,
+    value: unknown
+  ) {
+    if (!value || typeof value !== "object") return;
+    const snapshot = value as Partial<HeroRosterSnapshot>;
+    const ready = Boolean(this.contentRoot);
+    this.applyRosterSnapshot(snapshot);
+    if (ready) {
+      this.refresh();
+    }
+  }
+
+  private applyRosterSnapshot(
+    snapshot: Partial<HeroRosterSnapshot> | undefined
+  ) {
+    if (!snapshot) return;
+    if (snapshot.heroes) {
+      this.chainHeroes = [...snapshot.heroes].sort((a, b) => a.id - b.id);
+    }
+    if (typeof snapshot.heroesLoading === "boolean") {
+      this.heroesLoading = snapshot.heroesLoading;
+    }
+    if ("heroLoadError" in snapshot) {
+      this.heroLoadError = snapshot.heroLoadError;
+    }
+    if ("walletAddress" in snapshot) {
+      const nextWallet = snapshot.walletAddress;
+      const changed = this.walletAddress !== nextWallet;
+      this.walletAddress = nextWallet;
+      if (changed) {
+        void this.loadDungeons(true);
+      }
+    }
+    this.prunePartySelection();
+  }
+
+  private prunePartySelection() {
+    const validKeys = new Set(
+      this.chainHeroes.map((hero) => this.heroKey(hero))
+    );
+    if (!validKeys.size) {
+      if (this.partySelection.size) {
+        this.partySelection = new Set();
+      }
+      return;
+    }
+    const next = new Set<string>();
+    this.partySelection.forEach((id) => {
+      if (validKeys.has(id)) {
+        next.add(id);
+      }
+    });
+    if (next.size !== this.partySelection.size) {
+      this.partySelection = next;
+    }
+  }
+
+  private heroKey(hero: ChainHero) {
+    return hero.account || `hero-${hero.id}`;
+  }
+
   private toggleHero(heroId: string) {
+    const heroExists = this.chainHeroes.some(
+      (hero) => this.heroKey(hero) === heroId
+    );
+    if (!heroExists) return;
     if (this.partySelection.has(heroId)) {
       this.partySelection.delete(heroId);
     } else {
@@ -842,7 +1037,6 @@ export class EmbarkScene extends Phaser.Scene {
       }
       this.partySelection.add(heroId);
     }
-    this.refreshFooterStates();
     this.refresh();
   }
 
@@ -865,6 +1059,8 @@ export class EmbarkScene extends Phaser.Scene {
         .on("pointerover", () => background.setFillStyle(PANEL_COLORS.hover))
         .on("pointerout", () => background.setFillStyle(PANEL_COLORS.highlight))
         .on("pointerdown", () => this.tryEmbark());
+    } else {
+      background.disableInteractive();
     }
   }
 
@@ -879,12 +1075,12 @@ export class EmbarkScene extends Phaser.Scene {
     }
     const partyIds = Array.from(this.partySelection);
     const partyHeroes = partyIds
-      .map((id) => this.state.heroes.find((h) => h.id === id))
-      .filter((hero): hero is Hero => Boolean(hero))
+      .map((id) => this.chainHeroes.find((hero) => this.heroKey(hero) === id))
+      .filter((hero): hero is ChainHero => Boolean(hero))
       .map((hero) => ({
-        id: hero.id,
-        cls: hero.cls,
-        name: hero.name,
+        id: this.heroKey(hero),
+        cls: getHeroTypeLabel(hero.heroType) as HeroClass,
+        name: `Hero #${hero.id}`,
       }));
     if (!partyHeroes.length) {
       this.store.toast("Failed to prepare the selected party.");
@@ -896,7 +1092,6 @@ export class EmbarkScene extends Phaser.Scene {
       partyIds,
       supplies: this.state.inventory.items,
     };
-    console.log("[Embark] Expedition payload:", payload);
     this.store.consumeBlessings(payload.partyIds);
     const seed = this.normalizeSeed(payload.dungeon.dungeon.seed);
     this.scene.stop("TownScene");
@@ -917,176 +1112,230 @@ export class EmbarkScene extends Phaser.Scene {
   }
 
   private selectDungeon(dungeon: SelectedDungeon) {
+    if (dungeon.dungeon.status !== "ready") {
+      this.store.toast("That dungeon is still waiting on VRF settlement.");
+      return;
+    }
     this.selectedDungeon = dungeon;
     this.refresh();
   }
 
-  private promptCreateDungeon() {
-    const name = window.prompt("Dungeon name?", "New Expedition");
-    if (!name) return;
-    const difficulty = clamp(
-      parseInt(window.prompt("Difficulty 1-5", "2") || "2", 10),
-      1,
-      5
-    );
-    const description =
-      window.prompt("Describe this dungeon:", "A perilous venture.") ?? "";
-    const seed =
-      window.prompt("Seed (leave blank for random):", "") || this.newSeed();
-    const res = this.store.createDungeon({
-      name,
-      difficulty,
-      seed,
-      description,
-    });
-    this.store.toast(res.message || "");
-  }
+  private async mintDungeon() {
+    if (!this.walletAddress) {
+      this.store.toast("Connect your wallet first.");
+      return;
+    }
+    if (this.dungeonProgramBusy || this.dungeonsLoading) return;
 
-  private promptEditDungeon(dungeon: CustomDungeon) {
-    const name = window.prompt("Rename dungeon:", dungeon.name) ?? dungeon.name;
-    const difficulty = clamp(
-      parseInt(
-        window.prompt("Difficulty 1-5", String(dungeon.difficulty)) ||
-          String(dungeon.difficulty),
-        10
-      ),
-      1,
-      5
-    );
-    const description =
-      window.prompt("Edit description:", dungeon.description) ??
-      dungeon.description;
-    this.store.updateDungeon(dungeon.id, {
-      name,
-      difficulty,
-      description,
-    });
-  }
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.store.toast("RPC unavailable.");
+      return;
+    }
 
-  private deleteDungeon(dungeon: CustomDungeon) {
-    if (!window.confirm(`Retire ${dungeon.name}?`)) return;
-    const res = this.store.deleteDungeon(dungeon.id);
-    this.store.toast(res.message || "");
-    if (
-      this.selectedDungeon?.source === "custom" &&
-      this.selectedDungeon.dungeon.id === dungeon.id
-    ) {
-      this.selectedDungeon = undefined;
+    const owner = new PublicKey(this.walletAddress);
+    this.dungeonProgramBusy = true;
+    try {
+      const { instruction } = await createMintDungeonInstruction({
+        connection,
+        payer: owner,
+      });
+      await this.sendProgramTransaction([instruction]);
+      this.store.toast("Dungeon mint requested. Awaiting VRF settlement.");
+      await this.loadDungeons(true);
+    } catch (err) {
+      this.handleProgramError(err, "Failed to mint dungeon.");
+    } finally {
+      this.dungeonProgramBusy = false;
+      this.refresh();
     }
   }
 
-  private normalizeSeed(raw: string): number {
+  private async loadDungeons(force = false) {
+    if (this.dungeonsLoading && !force) {
+      return;
+    }
+    const ready = Boolean(this.contentRoot);
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.dungeonLoadError = "RPC unavailable.";
+      this.dungeonsLoading = false;
+      if (ready) this.refresh();
+      return;
+    }
+
+    this.dungeonsLoading = true;
+    this.dungeonLoadError = undefined;
+    if (ready) this.refresh();
+
+    try {
+      const owner = this.walletAddress
+        ? new PublicKey(this.walletAddress)
+        : undefined;
+      const { owned, others } = await fetchOwnedDungeonAccounts(
+        connection,
+        owner
+      );
+      this.myDungeons = owner ? owned : [];
+      this.communityDungeons = others;
+    } catch (error) {
+      console.error(error);
+      this.dungeonLoadError =
+        error instanceof Error ? error.message : "Unable to fetch dungeons.";
+      this.myDungeons = [];
+      this.communityDungeons = [];
+    } finally {
+      this.dungeonsLoading = false;
+      if (ready) this.refresh();
+    }
+  }
+
+  private estimateDifficulty(dungeon: ChainDungeon): number {
+    const roomCount = Math.max(1, dungeon.rooms.length);
+    const approximate = Math.ceil(roomCount / 8);
+    return clamp(approximate, 1, 5);
+  }
+
+  private shortenAddress(address: string) {
+    if (address.length <= 8) return address;
+    return `${address.slice(0, 4)}...${address.slice(-4)}`;
+  }
+
+  private getWalletProvider(): SolanaProvider | undefined {
+    if (this.walletProvider) return this.walletProvider;
+    if (typeof window === "undefined") return undefined;
+    const candidate = (window as unknown as { solana?: SolanaProvider }).solana;
+    if (candidate) {
+      this.walletProvider = candidate;
+      return candidate;
+    }
+    return undefined;
+  }
+
+  private getSolanaConnection(): Connection | undefined {
+    if (typeof window === "undefined") return undefined;
+    if (!this.solanaConnection) {
+      const env =
+        (
+          import.meta as unknown as {
+            env?: Record<string, string | undefined>;
+          }
+        ).env ?? {};
+      const endpoint =
+        env.VITE_SOLANA_RPC_URL ??
+        (window as unknown as { __DNB_SOLANA_RPC__?: string })
+          .__DNB_SOLANA_RPC__ ??
+        clusterApiUrl("devnet");
+      this.solanaConnection = new Connection(endpoint, "confirmed");
+    }
+    return this.solanaConnection;
+  }
+
+  private async sendProgramTransaction(
+    instructions: TransactionInstruction[]
+  ): Promise<string> {
+    const provider = this.getWalletProvider();
+    if (!provider) {
+      throw new Error("Wallet provider unavailable.");
+    }
+    if (!this.walletAddress) {
+      throw new Error("Wallet not connected.");
+    }
+
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      throw new Error("RPC unavailable.");
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+    const latestBlockhash = await connection.getLatestBlockhash();
+
+    const tx = new Transaction().add(...instructions);
+    tx.feePayer = owner;
+    tx.recentBlockhash = latestBlockhash.blockhash;
+
+    let signature: string;
+    if (provider.signAndSendTransaction) {
+      const result = await provider.signAndSendTransaction(tx);
+      signature = typeof result === "string" ? result : result.signature ?? "";
+    } else if (provider.signTransaction) {
+      const signed = await provider.signTransaction(tx);
+      signature = await connection.sendRawTransaction(signed.serialize());
+    } else {
+      throw new Error("Wallet does not support transaction signing.");
+    }
+
+    if (!signature) {
+      throw new Error("Transaction signature missing.");
+    }
+
+    const confirmation = await connection.confirmTransaction(
+      {
+        signature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+      },
+      "confirmed"
+    );
+
+    if (confirmation.value.err) {
+      throw new Error(
+        `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+      );
+    }
+
+    return signature;
+  }
+
+  private handleProgramError(error: unknown, fallback: string) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : fallback;
+
+    if (/user rejected/i.test(message)) {
+      this.store.toast("Transaction cancelled.");
+    } else {
+      console.error(error);
+      this.store.toast(fallback);
+    }
+  }
+
+  private normalizeSeed(raw: string | number): number {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return Math.floor(raw) >>> 0;
+    }
     if (!raw) return Date.now() & 0xffffffff;
     const numeric = Number(raw);
     if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
       return Math.floor(numeric);
     }
-    const digits = raw.replace(/\D/g, "");
+    const digits = typeof raw === "string" ? raw.replace(/\D/g, "") : "";
     if (digits) {
       const parsed = Number(digits);
       if (!Number.isNaN(parsed)) return parsed;
     }
     let hash = 0;
-    for (let i = 0; i < raw.length; i++) {
-      hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
+    if (typeof raw === "string") {
+      for (let i = 0; i < raw.length; i++) {
+        hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
+      }
     }
     return hash || 1;
   }
 
-  private applyCommunityFilters() {
-    return this.communityPool.filter((dungeon) => {
-      if (
-        dungeon.difficulty < this.communityFilters.difficultyMin ||
-        dungeon.difficulty > this.communityFilters.difficultyMax
-      ) {
-        return false;
-      }
-      if (this.communityFilters.search) {
-        const query = this.communityFilters.search.toLowerCase();
-        if (
-          !dungeon.name.toLowerCase().includes(query) &&
-          !dungeon.description.toLowerCase().includes(query)
-        ) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }
-
-  private promptDifficultyFilter() {
-    const min = clamp(
-      parseInt(
-        window.prompt(
-          "Minimum difficulty (1-5)",
-          String(this.communityFilters.difficultyMin)
-        ) || "1",
-        10
-      ),
-      1,
-      5
-    );
-    const max = clamp(
-      parseInt(
-        window.prompt(
-          "Maximum difficulty (1-5)",
-          String(this.communityFilters.difficultyMax)
-        ) || "5",
-        10
-      ),
-      1,
-      5
-    );
-    this.communityFilters.difficultyMin = Math.min(min, max);
-    this.communityFilters.difficultyMax = Math.max(min, max);
-    this.communityFilters.page = 0;
-    this.refresh();
-  }
-
-  private promptSearch() {
-    const query =
-      window.prompt("Search text:", this.communityFilters.search) ?? "";
-    this.communityFilters.search = query.trim();
-    this.communityFilters.page = 0;
-    this.refresh();
-  }
-
-  private resetFilters() {
-    this.communityFilters = {
-      difficultyMin: 1,
-      difficultyMax: 5,
-      search: "",
-      page: 0,
-    };
-    this.refresh();
-  }
-
   private toggleTab() {
-    this.switchTab(this.activeTab === "create" ? "community" : "create");
+    this.switchTab(this.activeTab === "my" ? "community" : "my");
   }
 
-  private switchTab(tab: "create" | "community") {
+  private switchTab(tab: "my" | "community") {
     if (this.activeTab === tab) return;
     this.activeTab = tab;
     this.contentScroll = 0;
     this.renderHeader();
     this.refresh();
-  }
-
-  private updateContentAreaHeight() {
-    this.contentHeight =
-      this.scale.height -
-      this.safe * 2 -
-      FOOTER_HEIGHT -
-      this.headerHeight -
-      32;
-  }
-
-  private newSeed() {
-    if (typeof crypto !== "undefined" && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return Math.random().toString(36).slice(2, 10).toUpperCase();
   }
 
   private exit() {

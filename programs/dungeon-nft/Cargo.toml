@@ -1,6 +1,6 @@
 [package]
-name = "dungeons-and-blocks"
-version = "0.2.6"
+name = "dungeon-nft"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
@@ -8,6 +8,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 anchor-lang = "0.31.1"
+ephemeral-vrf-sdk = { version = "0.1.2", features = ["anchor"] }
 
 [features]
 no-entrypoint = []

@@ -9,75 +9,46 @@ export function mulberry32(seed: number) {
   };
 }
 
-export function generateDungeon(w: number, h: number, seed = 1337): Dungeon {
-  const rnd = mulberry32(seed);
-  const g: Grid = Array.from({ length: h }, () => Array(w).fill(Tile.Wall));
-  const rooms: Rect[] = [];
-
-  const roomAttempts = 40;
-  for (let i = 0; i < roomAttempts; i++) {
-    const rw = 4 + ((rnd() * 9) | 0);
-    const rh = 4 + ((rnd() * 7) | 0);
-    const rx = 1 + ((rnd() * (w - rw - 2)) | 0);
-    const ry = 1 + ((rnd() * (h - rh - 2)) | 0);
-    for (let y = ry; y < ry + rh; y++)
-      for (let x = rx; x < rx + rw; x++) g[y][x] = Tile.Floor;
-    rooms.push({ x: rx, y: ry, w: rw, h: rh });
-  }
-
-  rooms.sort((a, b) => a.x - b.x);
-
-  const edges: Edge[] = [];
-  const doorTiles: { x: number; y: number }[] = [];
-
-  for (let i = 1; i < rooms.length; i++) {
-    const a = rooms[i - 1],
-      b = rooms[i];
-    const ax = a.x + (a.w >> 1),
-      ay = a.y + (a.h >> 1);
-    const bx = b.x + (b.w >> 1),
-      by = b.y + (b.h >> 1);
-
-    carveH(g, ax, bx, ay, doorTiles);
-    carveV(g, ay, by, bx, doorTiles);
-    edges.push({ a: i - 1, b: i });
-  }
-
-  const chests = placeChests(g, rooms, rnd, seed);
-  const portals = placePortals(g, seed, chests);
-
-  return { grid: g, rooms, edges, doorTiles, chests, portals };
-}
-
-function carveH(
-  g: Grid,
-  x0: number,
-  x1: number,
-  y: number,
-  doors: { x: number; y: number }[]
-) {
-  const [min, max] = [Math.min(x0, x1), Math.max(x0, x1)];
-  for (let x = min; x <= max; x++) g[y][x] = Tile.Floor;
-  doors.push({ x: min, y });
-  doors.push({ x: max, y }); // endpoints ≈ door frames
-}
-function carveV(
-  g: Grid,
-  y0: number,
-  y1: number,
-  x: number,
-  doors: { x: number; y: number }[]
-) {
-  const [min, max] = [Math.min(y0, y1), Math.max(y0, y1)];
-  for (let y = min; y <= max; y++) g[y][x] = Tile.Floor;
-  doors.push({ x, y: min });
-  doors.push({ x, y: max });
-}
-
-function placeChests(
-  grid: Grid,
+export function deriveDoorTilesFromRooms(
   rooms: Rect[],
-  rnd: () => number,
+  edges: Edge[]
+): { x: number; y: number }[] {
+  const doors: { x: number; y: number }[] = [];
+  const seen = new Set<string>();
+
+  const addDoor = (x: number, y: number) => {
+    const key = `${x},${y}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    doors.push({ x, y });
+  };
+
+  edges.forEach((edge) => {
+    const roomA = rooms[edge.a];
+    const roomB = rooms[edge.b];
+    if (!roomA || !roomB) return;
+
+    const ax = roomA.x + (roomA.w >> 1);
+    const ay = roomA.y + (roomA.h >> 1);
+    const bx = roomB.x + (roomB.w >> 1);
+    const by = roomB.y + (roomB.h >> 1);
+
+    const minX = Math.min(ax, bx);
+    const maxX = Math.max(ax, bx);
+    addDoor(minX, ay);
+    addDoor(maxX, ay);
+
+    const minY = Math.min(ay, by);
+    const maxY = Math.max(ay, by);
+    addDoor(bx, minY);
+    addDoor(bx, maxY);
+  });
+
+  return doors;
+}
+
+export function generateChestTiles(
+  grid: Grid,
   seed: number
 ): { x: number; y: number }[] {
   const floors: { x: number; y: number }[] = [];
@@ -104,7 +75,7 @@ function placeChests(
   return result;
 }
 
-function placePortals(
+export function generatePortalTiles(
   grid: Grid,
   seed: number,
   chests: { x: number; y: number }[]
