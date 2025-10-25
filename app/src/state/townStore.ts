@@ -9,7 +9,6 @@ import {
   HeroTrait,
   HeroTraitCondition,
   Inventory,
-  ItemDefinition,
   ItemId,
   MARKET_ITEMS,
   MAX_ACTIVE_SKILLS,

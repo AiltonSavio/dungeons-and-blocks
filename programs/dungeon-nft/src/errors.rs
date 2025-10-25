@@ -24,8 +24,8 @@ pub enum DungeonError {
     InvalidRandomness,
     #[msg("Invalid configuration reference")]
     InvalidConfigReference,
-    #[msg("Grid data invalid")]
-    InvalidGridData,
     #[msg("Grid size cannot change after minting begins")]
     GridImmutableAfterMint,
+    #[msg("Seeded mint authority mismatch")]
+    UnauthorizedSeedAuthority,
 }

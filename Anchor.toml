@@ -5,12 +5,14 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-hero_core = "27hg9oCnyUUeAQfU8H3zwFfHaq7sX5PEwZHit7yVx1nJ"
-dungeon_nft = "EXpvktpk2rhQQe38yaq1DaRhTwRUofKzZtE1gZ4Z2JAt"
+adventure_engine = "9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt"
+hero_core = "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
+dungeon_nft = "3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw"
 
 [programs.localnet]
-hero-core = "27hg9oCnyUUeAQfU8H3zwFfHaq7sX5PEwZHit7yVx1nJ"
-dungeon-nft = "EXpvktpk2rhQQe38yaq1DaRhTwRUofKzZtE1gZ4Z2JAt"
+adventure-engine = "9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt"
+hero-core = "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
+dungeon-nft = "3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw"
 
 [registry]
 url = "https://api.apr.dev"
@@ -25,6 +27,7 @@ members = ["programs/*"]
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 init-dungeon-config = "node scripts/init-dungeon-config.js"
+seeded-mint = "node scripts/seeded-mint.js"
 
 [test]
 startup_wait = 5000

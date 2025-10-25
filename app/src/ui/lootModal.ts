@@ -1,5 +1,4 @@
-import type Phaser from "phaser";
-import type { Inventory } from "../state/inventory";
+import Phaser from "phaser";
 import { resolveItem, type ItemId } from "../state/items";
 import type { LootReward } from "../state/loot";
 

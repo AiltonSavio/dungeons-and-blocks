@@ -4,8 +4,8 @@ use ephemeral_vrf_sdk::consts::{DEFAULT_QUEUE, VRF_PROGRAM_IDENTITY};
 use ephemeral_vrf_sdk::instructions::{create_request_randomness_ix, RequestRandomnessParams};
 
 use crate::constants::{
-    GAME_VAULT_SEED, GOLD_ACCOUNT_SEED, HERO_PRICE, HERO_SEED, MAX_FREE_HEROES,
-    MAX_HEROES_PER_PLAYER, PLAYER_PROFILE_SEED,
+    seeded_mint_authority, GAME_VAULT_SEED, GOLD_ACCOUNT_SEED, HERO_PRICE, HERO_SEED,
+    MAX_FREE_HEROES, MAX_HEROES_PER_PLAYER, PLAYER_PROFILE_SEED,
 };
 use crate::errors::HeroError;
 use crate::helpers::{derive_caller_seed, meta};
@@ -240,6 +240,111 @@ pub fn callback_mint_hero_paid(
     });
 
     Ok(())
+}
+
+pub fn mint_hero_with_seed(
+    ctx: Context<MintHeroWithSeed>,
+    owner: Pubkey,
+    seed: [u8; 32],
+    is_soulbound: bool,
+) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.authority.key(),
+        seeded_mint_authority(),
+        HeroError::UnauthorizedAuthority
+    );
+
+    let profile = &mut ctx.accounts.player_profile;
+    let owner_account = ctx.accounts.owner.key();
+    require_keys_eq!(owner_account, owner, HeroError::UnauthorizedOwner);
+
+    if profile.owner == Pubkey::default() {
+        profile.owner = owner;
+        profile.bump = ctx.bumps.player_profile;
+        profile.hero_count = 0;
+        profile.free_mints_claimed = false;
+        profile.free_mint_count = 0;
+        profile.next_hero_id = 0;
+        profile.soulbound_hero_ids = Default::default();
+        profile.reserved = [0; 32];
+    } else {
+        require_keys_eq!(profile.owner, owner, HeroError::UnauthorizedOwner);
+    }
+
+    require!(
+        profile.hero_count < MAX_HEROES_PER_PLAYER,
+        HeroError::HeroCapacityReached
+    );
+
+    let hero = &mut ctx.accounts.hero_mint;
+    let hero_id = profile.next_hero_id;
+
+    hero.owner = owner;
+    hero.bump = ctx.bumps.hero_mint;
+    hero.id = hero_id;
+    hero.pending_request = PendingRequestType::None as u8;
+    hero.is_burned = false;
+    hero.is_soulbound = is_soulbound;
+    hero.locked = false;
+    hero.locked_adventure = Pubkey::default();
+    hero.locked_program = Pubkey::default();
+    hero.locked_since = 0;
+    hero.padding = [0; 31];
+
+    fill_hero_from_randomness(hero, seed)?;
+    hero.is_soulbound = is_soulbound;
+
+    profile.hero_count = profile
+        .hero_count
+        .checked_add(1)
+        .ok_or(HeroError::MathOverflow)?;
+    profile.next_hero_id = profile
+        .next_hero_id
+        .checked_add(1)
+        .ok_or(HeroError::MathOverflow)?;
+
+    if is_soulbound {
+        register_soulbound(&mut *profile, hero.id)?;
+    }
+
+    emit!(HeroMinted {
+        player: hero.owner,
+        hero_id: hero.id,
+        hero_type: hero.hero_type,
+        level: hero.level,
+        is_soulbound: hero.is_soulbound,
+    });
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct MintHeroWithSeed<'info> {
+    #[account(mut, address = seeded_mint_authority())]
+    pub authority: Signer<'info>,
+    /// CHECK: The wallet that will own the hero.
+    pub owner: UncheckedAccount<'info>,
+    #[account(
+        init_if_needed,
+        payer = authority,
+        space = PlayerProfile::LEN,
+        seeds = [PLAYER_PROFILE_SEED, owner.key().as_ref()],
+        bump
+    )]
+    pub player_profile: Account<'info, PlayerProfile>,
+    #[account(
+        init,
+        payer = authority,
+        space = HeroMint::LEN,
+        seeds = [
+            HERO_SEED,
+            owner.key().as_ref(),
+            &player_profile.next_hero_id.to_le_bytes()
+        ],
+        bump
+    )]
+    pub hero_mint: Account<'info, HeroMint>,
+    pub system_program: Program<'info, System>,
 }
 
 #[vrf]

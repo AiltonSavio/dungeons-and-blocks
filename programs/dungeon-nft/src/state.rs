@@ -42,31 +42,13 @@ pub struct DungeonMint {
     pub grid_width: u16,
     pub grid_height: u16,
     pub created_at: i64,
-    pub randomness: [u8; 32],
     pub metadata: DungeonMetadata,
-    pub grid: Vec<u8>,
-    pub rooms: Vec<DungeonRect>,
-    pub edges: Vec<DungeonEdge>,
 }
 
 impl DungeonMint {
-    pub fn space(grid_width: u16, grid_height: u16) -> usize {
-        let cell_count = grid_width as usize * grid_height as usize;
+    pub fn space(_grid_width: u16, _grid_height: u16) -> usize {
         let metadata_space = DungeonMetadata::space();
-        8 + 32
-            + 32
-            + 1
-            + 1
-            + 2
-            + 4
-            + 2
-            + 2
-            + 8
-            + 32
-            + metadata_space
-            + (4 + cell_count)
-            + (4 + MAX_ROOMS * DungeonRect::SIZE)
-            + (4 + MAX_EDGES * DungeonEdge::SIZE)
+        8 + 32 + 32 + 1 + 1 + 2 + 4 + 2 + 2 + 8 + metadata_space
     }
 }
 
@@ -94,38 +76,6 @@ impl DungeonMetadata {
     pub fn space() -> usize {
         (4 + MAX_METADATA_NAME_LEN) + (4 + MAX_SYMBOL_LEN) + (4 + MAX_METADATA_URI_LEN)
     }
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DungeonRect {
-    pub x: u16,
-    pub y: u16,
-    pub w: u16,
-    pub h: u16,
-}
-
-impl DungeonRect {
-    pub const SIZE: usize = 8;
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DungeonEdge {
-    pub a: u16,
-    pub b: u16,
-}
-
-impl DungeonEdge {
-    pub const SIZE: usize = 4;
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DungeonPoint {
-    pub x: u16,
-    pub y: u16,
-}
-
-impl DungeonPoint {
-    pub const SIZE: usize = 4;
 }
 
 #[event]

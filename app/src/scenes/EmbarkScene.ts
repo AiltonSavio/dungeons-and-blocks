@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import {
+  ComputeBudgetProgram,
   Connection,
   PublicKey,
   Transaction,
@@ -15,6 +16,14 @@ import {
   fetchOwnedDungeonAccounts,
 } from "../state/dungeonChain";
 import {
+  createDelegateAdventureInstruction,
+  createStartAdventureInstruction,
+  fetchAdventureSession,
+  fetchAdventureSessionSmart,
+  deriveAdventurePda,
+  createSetDelegateInstruction,
+} from "../state/adventureChain";
+import {
   SAFE_MARGIN,
   UI_FONT,
   PANEL_COLORS,
@@ -22,6 +31,10 @@ import {
   snap,
 } from "../ui/uiConfig";
 import { setInventoryVisible } from "../ui/hudControls";
+import {
+  deriveTempKeypair,
+  ensureTempKeypairFunded,
+} from "../state/tempKeypair";
 
 type SelectedDungeon = { source: "my" | "community"; dungeon: ChainDungeon };
 
@@ -33,6 +46,12 @@ type HeroRosterSnapshot = {
   heroesLoading: boolean;
   heroLoadError?: string;
   walletAddress?: string;
+};
+
+type PartyHeroSnapshot = {
+  id: string;
+  cls: HeroClass;
+  name: string;
 };
 
 type EmbarkSceneLaunchData = Partial<HeroRosterSnapshot>;
@@ -78,8 +97,10 @@ export class EmbarkScene extends Phaser.Scene {
   private dungeonsLoading = false;
   private dungeonLoadError?: string;
   private dungeonProgramBusy = false;
+  private embarkBusy = false;
   private walletProvider?: SolanaProvider;
   private solanaConnection?: Connection;
+  private ephemeralConnection?: Connection;
 
   private safe = SAFE_MARGIN;
   private contentWidth = 0;
@@ -94,10 +115,9 @@ export class EmbarkScene extends Phaser.Scene {
 
   private footer?: Phaser.GameObjects.Container;
   private footerCounter!: Phaser.GameObjects.Text;
-  private footerEnterBtn!: Phaser.GameObjects.Container;
+  private footerEnterBtn?: Phaser.GameObjects.Container;
 
   // footer scrolling resources
-  private footerPartyList?: Phaser.GameObjects.Container;
   private footerPartyMaskRect?: Phaser.GameObjects.Rectangle;
   private footerPartyMask?: Phaser.Display.Masks.GeometryMask;
   private footerWheelHandler?: (
@@ -411,7 +431,6 @@ export class EmbarkScene extends Phaser.Scene {
     // Container that holds all chips (unmasked)
     const partyList = this.add.container(listX, listY);
     partyCol.add(partyList);
-    this.footerPartyList = partyList;
 
     let partyY = 0;
     const addPartyMessage = (text: string, color = "#9fa6c0") => {
@@ -428,13 +447,11 @@ export class EmbarkScene extends Phaser.Scene {
     if (!this.walletAddress) {
       addPartyMessage("Connect your wallet in town to choose on-chain heroes.");
       partyList.destroy();
-      this.footerPartyList = undefined;
       this.footerPartyMask = undefined;
       this.footerPartyMaskRect = undefined;
     } else if (this.heroesLoading) {
       addPartyMessage("Loading heroes from the chain...");
       partyList.destroy();
-      this.footerPartyList = undefined;
       this.footerPartyMask = undefined;
       this.footerPartyMaskRect = undefined;
     } else if (this.heroLoadError) {
@@ -443,7 +460,6 @@ export class EmbarkScene extends Phaser.Scene {
         "#ff8a8a"
       );
       partyList.destroy();
-      this.footerPartyList = undefined;
       this.footerPartyMask = undefined;
       this.footerPartyMaskRect = undefined;
     } else if (!this.chainHeroes.length) {
@@ -451,7 +467,6 @@ export class EmbarkScene extends Phaser.Scene {
         "No on-chain heroes yet. Summon allies in town to build your roster."
       );
       partyList.destroy();
-      this.footerPartyList = undefined;
       this.footerPartyMask = undefined;
       this.footerPartyMaskRect = undefined;
     } else {
@@ -545,13 +560,13 @@ export class EmbarkScene extends Phaser.Scene {
       );
     });
 
-    // === Enter button (right aligned) ===
+    const buttonY = FOOTER_HEIGHT - BUTTON_DIMENSIONS.height - 20;
     this.footerEnterBtn = this.createSmallButton(
       this.contentWidth - 260,
-      FOOTER_HEIGHT - BUTTON_DIMENSIONS.height - 20,
+      buttonY,
       240,
       "Enter Dungeon",
-      () => this.tryEmbark(),
+      () => this.enterDungeon(),
       this.canEnter()
     );
     this.footer.add(this.footerEnterBtn);
@@ -1014,9 +1029,7 @@ export class EmbarkScene extends Phaser.Scene {
         next.add(id);
       }
     });
-    if (next.size !== this.partySelection.size) {
-      this.partySelection = next;
-    }
+    this.partySelection = next;
   }
 
   private heroKey(hero: ChainHero) {
@@ -1041,38 +1054,151 @@ export class EmbarkScene extends Phaser.Scene {
   }
 
   private refreshFooterStates() {
-    if (!this.footerCounter || !this.footerEnterBtn) return;
-    this.footerCounter.setText(`Selected ${this.partySelection.size}/4`);
-    const enabled = this.canEnter();
-    const background = this.footerEnterBtn.getAt(
-      0
-    ) as Phaser.GameObjects.Rectangle;
-    const label = this.footerEnterBtn.getAt(1) as Phaser.GameObjects.Text;
-    background.setFillStyle(
-      enabled ? PANEL_COLORS.highlight : PANEL_COLORS.disabled
+    if (this.footerCounter) {
+      this.footerCounter.setText(`Selected ${this.partySelection.size}/4`);
+    }
+
+    this.configureFooterButton(
+      this.footerEnterBtn,
+      "Enter Dungeon",
+      this.canEnter(),
+      () => this.enterDungeon()
     );
-    label.setColor(enabled ? "#f4f6ff" : "#7d8499");
+  }
+
+  private configureFooterButton(
+    button: Phaser.GameObjects.Container | undefined,
+    label: string,
+    enabled: boolean,
+    handler: () => void
+  ) {
+    if (!button) return;
+    const background = button.getAt(0) as Phaser.GameObjects.Rectangle;
+    const text = button.getAt(1) as Phaser.GameObjects.Text;
+    text.setText(label);
+
+    if (enabled) {
+      background.setFillStyle(PANEL_COLORS.highlight);
+      text.setColor("#f4f6ff");
+    } else {
+      background.setFillStyle(PANEL_COLORS.disabled);
+      text.setColor("#7d8499");
+    }
+
     background.removeAllListeners();
     if (enabled) {
       background
         .setInteractive({ cursor: "pointer" })
         .on("pointerover", () => background.setFillStyle(PANEL_COLORS.hover))
         .on("pointerout", () => background.setFillStyle(PANEL_COLORS.highlight))
-        .on("pointerdown", () => this.tryEmbark());
+        .on("pointerdown", handler);
     } else {
       background.disableInteractive();
     }
   }
 
-  private tryEmbark() {
+  private async enterDungeon() {
+    if (this.embarkBusy) return;
     if (!this.selectedDungeon) {
       this.store.toast("Select a dungeon first.");
       return;
     }
-    if (!this.canEnter()) {
+    if (this.partySelection.size === 0) {
       this.store.toast("Choose 1–4 heroes to continue.");
       return;
     }
+    if (!this.walletAddress) {
+      this.store.toast("Connect your wallet first.");
+      return;
+    }
+
+    const connection = this.getSolanaConnection();
+    const ephemeralConnection = this.getEphemeralConnection();
+    if (!connection || !ephemeralConnection) {
+      this.store.toast("RPC unavailable.");
+      return;
+    }
+
+    const selectedDungeon = this.selectedDungeon;
+    let dungeonPubkey: PublicKey;
+    let playerKey: PublicKey;
+
+    try {
+      dungeonPubkey = new PublicKey(selectedDungeon.dungeon.publicKey);
+      playerKey = new PublicKey(this.walletAddress);
+    } catch (err) {
+      console.error("Invalid address", err);
+      this.store.toast("Invalid dungeon or wallet address.");
+      return;
+    }
+
+    // Check if adventure already exists and is active
+    // Use smart fetch to get from ephemeral if delegated, base layer if not
+    const [adventurePda] = deriveAdventurePda(playerKey, dungeonPubkey);
+    let existingAdventure: any = null;
+
+    try {
+      existingAdventure = await fetchAdventureSessionSmart(
+        connection,
+        ephemeralConnection,
+        adventurePda
+      );
+    } catch (err) {
+      // If deserialization fails, the account exists but has old structure
+      console.error("[EmbarkScene] Failed to fetch adventure:", err);
+      const accountInfo = await connection.getAccountInfo(adventurePda);
+      if (accountInfo) {
+        this.store.toast(
+          "Your adventure account needs to be recreated. Please close your existing adventure first or wait for it to expire."
+        );
+        return;
+      }
+      // Account doesn't exist, continue with creation
+    }
+
+    // If adventure exists and is active, just enter the game
+    if (
+      existingAdventure &&
+      existingAdventure.isActive &&
+      existingAdventure.heroesInside
+    ) {
+      const partyHeroes: PartyHeroSnapshot[] = [];
+      const byAccount = new Map(this.chainHeroes.map((h) => [h.account, h]));
+
+      for (const mint of existingAdventure.heroMints) {
+        const h = byAccount.get(mint);
+        if (!h) continue;
+        partyHeroes.push({
+          id: this.heroKey(h),
+          cls: getHeroTypeLabel(h.heroType) as HeroClass,
+          name: `Hero #${h.id}`,
+        });
+      }
+
+      // Fund temp keypair before entering the game
+      const fundSuccess = await this.fundTempKeypairForPlayer(playerKey);
+      if (!fundSuccess) {
+        this.store.toast(
+          "Failed to prepare movement keypair. Please try again."
+        );
+        return;
+      }
+
+      const seed = this.normalizeSeed(selectedDungeon.dungeon.seed);
+
+      this.scene.stop("TownScene");
+      this.scene.start("game", {
+        seed,
+        heroes: partyHeroes,
+        supplies: this.state.inventory.items,
+        dungeon: selectedDungeon,
+        adventure: existingAdventure,
+        player: playerKey.toBase58(),
+      });
+      return;
+    }
+
+    // Otherwise, start a new adventure
     const partyIds = Array.from(this.partySelection);
     const partyHeroes = partyIds
       .map((id) => this.chainHeroes.find((hero) => this.heroKey(hero) === id))
@@ -1082,42 +1208,185 @@ export class EmbarkScene extends Phaser.Scene {
         cls: getHeroTypeLabel(hero.heroType) as HeroClass,
         name: `Hero #${hero.id}`,
       }));
+
     if (!partyHeroes.length) {
       this.store.toast("Failed to prepare the selected party.");
       return;
     }
 
-    const payload = {
-      dungeon: this.selectedDungeon,
-      partyIds,
-      supplies: this.state.inventory.items,
-    };
-    this.store.consumeBlessings(payload.partyIds);
-    const seed = this.normalizeSeed(payload.dungeon.dungeon.seed);
-    this.scene.stop("TownScene");
-    this.scene.start("game", {
-      seed,
-      heroes: partyHeroes,
-      supplies: payload.supplies,
-      dungeon: payload.dungeon,
-    });
+    const heroMints: PublicKey[] = [];
+    for (const id of partyIds) {
+      const hero = this.chainHeroes.find(
+        (candidate) => this.heroKey(candidate) === id
+      );
+      if (!hero) continue;
+      try {
+        heroMints.push(new PublicKey(hero.account));
+      } catch (err) {
+        console.error("Invalid hero mint", err);
+        this.store.toast(`Hero ${hero.id} has an invalid account address.`);
+        return;
+      }
+    }
+
+    if (!heroMints.length) {
+      this.store.toast("Unable to resolve hero accounts.");
+      return;
+    }
+
+    this.embarkBusy = true;
+    this.refreshFooterStates();
+
+    try {
+      // Derive temp keypair for ephemeral signing
+      const tempKeypair = deriveTempKeypair(playerKey);
+      console.log(
+        "[EmbarkScene] Temp keypair:",
+        tempKeypair.publicKey.toBase58()
+      );
+
+      // Fund temp keypair FIRST (before creating adventure)
+      console.log(
+        "[EmbarkScene] Funding temp keypair before adventure creation..."
+      );
+      const fundSuccess = await this.fundTempKeypairForPlayer(playerKey);
+      if (!fundSuccess) {
+        this.store.toast(
+          "Failed to prepare movement keypair. Please try again."
+        );
+        return;
+      }
+
+      // Create start adventure instruction
+      const { instruction: startIx } = await createStartAdventureInstruction({
+        connection,
+        player: playerKey,
+        dungeonMint: dungeonPubkey,
+        heroMints,
+      });
+
+      // Write the delegate pubkey into the PDA data
+      const { instruction: setDelegateIx } = await createSetDelegateInstruction(
+        {
+          connection,
+          payer: playerKey,
+          adventurePda,
+          delegate: tempKeypair.publicKey,
+        }
+      );
+
+      // Delegate the PDA to the ephemeral rollup
+      const { instruction: delegateIx } =
+        await createDelegateAdventureInstruction({
+          connection,
+          payer: playerKey,
+          adventurePda,
+          owner: playerKey,
+          dungeonMint: dungeonPubkey,
+        });
+
+      const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
+        units: 800_000,
+      });
+
+      // Send all instructions in one transaction
+      console.log("[EmbarkScene] Creating adventure and delegating to ER...");
+      await this.sendProgramTransaction([
+        computeIx,
+        startIx,
+        setDelegateIx,
+        delegateIx,
+      ]);
+
+      // Fetch the created adventure from base layer
+      console.log("[EmbarkScene] Fetching adventure account...");
+      const adventureAccount = await fetchAdventureSession(
+        connection,
+        adventurePda
+      );
+      if (!adventureAccount) {
+        this.store.toast("Adventure account not found after creation.");
+        return;
+      }
+
+      console.log(
+        "[EmbarkScene] Adventure created successfully, delegate:",
+        adventureAccount.delegate
+      );
+
+      this.store.consumeBlessings(partyIds);
+
+      const seed = this.normalizeSeed(selectedDungeon.dungeon.seed);
+
+      this.scene.stop("TownScene");
+      this.scene.start("game", {
+        seed,
+        heroes: partyHeroes,
+        supplies: this.state.inventory.items,
+        dungeon: selectedDungeon,
+        adventure: adventureAccount,
+        player: playerKey.toBase58(),
+      });
+    } catch (err) {
+      this.handleProgramError(err, "Failed to enter dungeon.");
+    } finally {
+      this.embarkBusy = false;
+      this.refreshFooterStates();
+    }
+  }
+
+  private async fundTempKeypairForPlayer(
+    playerKey: PublicKey
+  ): Promise<boolean> {
+    // Use BASE layer connection for funding (where player has SOL)
+    const connection = this.getSolanaConnection();
+    const provider = this.getWalletProvider();
+    if (!connection || !provider) {
+      console.error("[EmbarkScene] Base connection or provider not available");
+      return false;
+    }
+
+    try {
+      const tempKeypair = deriveTempKeypair(playerKey);
+      console.log(
+        "[EmbarkScene] Funding temp keypair from base layer:",
+        tempKeypair.publicKey.toBase58()
+      );
+
+      const success = await ensureTempKeypairFunded(
+        connection,
+        provider,
+        playerKey,
+        tempKeypair
+      );
+
+      if (success) {
+        console.log("[EmbarkScene] Temp keypair funded successfully");
+      }
+      return success;
+    } catch (err) {
+      console.error("[EmbarkScene] Failed to fund temp keypair:", err);
+      return false;
+    }
   }
 
   private canEnter() {
     return (
       !!this.selectedDungeon &&
       this.partySelection.size >= 1 &&
-      this.partySelection.size <= 4
+      this.partySelection.size <= 4 &&
+      !this.embarkBusy
     );
   }
 
-  private selectDungeon(dungeon: SelectedDungeon) {
+  private async selectDungeon(dungeon: SelectedDungeon) {
     if (dungeon.dungeon.status !== "ready") {
       this.store.toast("That dungeon is still waiting on VRF settlement.");
       return;
     }
     this.selectedDungeon = dungeon;
     this.refresh();
+    this.refreshFooterStates();
   }
 
   private async mintDungeon() {
@@ -1191,8 +1460,9 @@ export class EmbarkScene extends Phaser.Scene {
   }
 
   private estimateDifficulty(dungeon: ChainDungeon): number {
-    const roomCount = Math.max(1, dungeon.rooms.length);
-    const approximate = Math.ceil(roomCount / 8);
+    // Estimate difficulty based on dungeon size
+    const area = dungeon.gridWidth * dungeon.gridHeight;
+    const approximate = Math.ceil(area / 200); // Rough estimate: larger dungeons = harder
     return clamp(approximate, 1, 5);
   }
 
@@ -1231,6 +1501,25 @@ export class EmbarkScene extends Phaser.Scene {
     return this.solanaConnection;
   }
 
+  private getEphemeralConnection(): Connection | undefined {
+    if (typeof window === "undefined") return undefined;
+    if (!this.ephemeralConnection) {
+      const env =
+        (
+          import.meta as unknown as {
+            env?: Record<string, string | undefined>;
+          }
+        ).env ?? {};
+      const endpoint =
+        env.VITE_MAGICBLOCK_RPC_URL ??
+        (window as unknown as { __DNB_MAGICBLOCK_RPC__?: string })
+          .__DNB_MAGICBLOCK_RPC__ ??
+        "https://devnet.magicblock.app";
+      this.ephemeralConnection = new Connection(endpoint, "confirmed");
+    }
+    return this.ephemeralConnection;
+  }
+
   private async sendProgramTransaction(
     instructions: TransactionInstruction[]
   ): Promise<string> {
@@ -1253,6 +1542,27 @@ export class EmbarkScene extends Phaser.Scene {
     const tx = new Transaction().add(...instructions);
     tx.feePayer = owner;
     tx.recentBlockhash = latestBlockhash.blockhash;
+
+    console.log("Attempting transaction simulation...");
+    try {
+      const simulation = await connection.simulateTransaction(tx);
+      if (simulation.value.err) {
+        console.error("Simulation error:", simulation.value.err);
+        console.error("Simulation logs:", simulation.value.logs);
+        throw new Error(
+          `Simulation failed: ${JSON.stringify(simulation.value.err)}`
+        );
+      } else {
+        console.log("Simulation successful");
+        console.log("Simulation logs:", simulation.value.logs);
+      }
+    } catch (simErr) {
+      console.error(
+        "Simulation attempt failed (this might be expected):",
+        simErr
+      );
+      throw new Error("Transaction simulation failed.");
+    }
 
     let signature: string;
     if (provider.signAndSendTransaction) {

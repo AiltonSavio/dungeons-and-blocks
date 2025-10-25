@@ -8,15 +8,16 @@ edition = "2021"
 crate-type = ["cdylib", "lib"]
 name = "hero_core"
 
-[features]
-default = []
-cpi = ["no-entrypoint"]
-no-entrypoint = []
-no-idl = []
-no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
-
 [dependencies]
 anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
 ephemeral-rollups-sdk = { version = "0.2.4", features = ["anchor"] }
 ephemeral-vrf-sdk = { version = "0.1.2", features = ["anchor"] }
+
+[features]
+default = []
+anchor-debug = []
+cpi = []
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]

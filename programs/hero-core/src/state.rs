@@ -44,12 +44,36 @@ pub struct HeroMint {
     pub mint_timestamp: i64,
     pub last_level_up: i64,
     pub pending_request: u8,
+    pub locked: bool,
+    pub locked_adventure: Pubkey,
+    pub locked_program: Pubkey,
+    pub locked_since: i64,
     pub padding: [u8; 31],
 }
 
 impl HeroMint {
-    pub const LEN: usize =
-        8 + 32 + 1 + 8 + 1 + 1 + 8 + 8 + 1 + (1 * 2) + (3 * 2) + (3 * 2) + 1 + 1 + 8 + 8 + 1 + 31;
+    pub const LEN: usize = 8
+        + 32
+        + 1
+        + 8
+        + 1
+        + 1
+        + 8
+        + 8
+        + 1
+        + (1 * 2)
+        + (3 * 2)
+        + (3 * 2)
+        + 1
+        + 1
+        + 8
+        + 8
+        + 1
+        + 1
+        + 32
+        + 32
+        + 8
+        + 31;
 }
 
 #[account]
@@ -169,4 +193,18 @@ pub struct StatusEffectRemoved {
 pub struct HeroBurned {
     pub player: Pubkey,
     pub hero_id: u64,
+}
+
+#[event]
+pub struct HeroLockedEvent {
+    pub player: Pubkey,
+    pub hero_id: u64,
+    pub adventure: Pubkey,
+}
+
+#[event]
+pub struct HeroUnlockedEvent {
+    pub player: Pubkey,
+    pub hero_id: u64,
+    pub adventure: Pubkey,
 }

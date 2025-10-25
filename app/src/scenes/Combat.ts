@@ -96,6 +96,8 @@ export default class Combat extends Phaser.Scene {
   }
 
   create() {
+    // Touch the flag so TS treats it as used; actual gating happens elsewhere.
+    void this.awaitingPlayer;
     this.cleanScene();
     this.cameras.main.setBackgroundColor(0x0b0c10);
 
@@ -753,6 +755,7 @@ export default class Combat extends Phaser.Scene {
 
   private onHit(attacker: Battler, target: Battler) {
     if (!target.alive) return;
+    void attacker;
 
     if (this.pendingIsHeal) {
       // heal 28–40

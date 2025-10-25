@@ -181,12 +181,9 @@ pub fn validate_level_up_requirements(hero: &crate::state::HeroMint) -> Result<u
     require!(hero.level >= 1, HeroError::InvalidLevelProgression);
     require!(hero.level < MAX_LEVEL, HeroError::MaxLevelReached);
 
-    let target_level = hero
-        .level
-        .checked_add(1)
-        .ok_or(HeroError::MathOverflow)?;
-    let required_experience = experience_threshold_for_level(target_level)
-        .ok_or(HeroError::InvalidLevelProgression)?;
+    let target_level = hero.level.checked_add(1).ok_or(HeroError::MathOverflow)?;
+    let required_experience =
+        experience_threshold_for_level(target_level).ok_or(HeroError::InvalidLevelProgression)?;
     require!(
         hero.experience > required_experience,
         HeroError::InsufficientExperience

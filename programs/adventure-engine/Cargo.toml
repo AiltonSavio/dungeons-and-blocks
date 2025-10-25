@@ -1,5 +1,5 @@
 [package]
-name = "dungeon-nft"
+name = "adventure-engine"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,7 +8,9 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 anchor-lang = "0.31.1"
-ephemeral-vrf-sdk = { version = "0.1.2", features = ["anchor"] }
+ephemeral-rollups-sdk = { version = "0.2.12", features = ["anchor"] }
+dungeon-nft = { path = "../dungeon-nft", features = ["no-entrypoint"] }
+hero-core = { path = "../hero-core", features = ["no-entrypoint", "cpi"] }
 
 [features]
 default = []
@@ -18,4 +20,3 @@ no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build"]
-

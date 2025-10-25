@@ -7,15 +7,14 @@ use crate::constants::{HERO_SEED, MAX_LEVEL};
 use crate::errors::HeroError;
 use crate::helpers::{derive_caller_seed, meta};
 use crate::logic::{apply_level_up, validate_level_up_requirements};
-use crate::state::{
-    HeroLeveledUp, HeroMint, PendingRequestType, RandomnessRequested, RequestType,
-};
+use crate::state::{HeroLeveledUp, HeroMint, PendingRequestType, RandomnessRequested, RequestType};
 
 pub fn level_up_hero(ctx: Context<LevelUpHero>, hero_id: u64) -> Result<()> {
     let hero = &mut ctx.accounts.hero_mint;
     let payer_key = ctx.accounts.payer.key();
 
     require_eq!(hero.id, hero_id, HeroError::HeroMismatch);
+    require!(!hero.locked, HeroError::HeroLocked);
     require!(!hero.is_burned, HeroError::HeroBurned);
 
     let _target_level = validate_level_up_requirements(&*hero)?;
@@ -64,16 +63,14 @@ pub fn callback_level_up_hero(
         HeroError::UnauthorizedOwner
     );
 
+    require!(!hero.locked, HeroError::HeroLocked);
     require!(
         hero.pending_request == PendingRequestType::LevelUp as u8,
         HeroError::UnexpectedCallback
     );
     require!(!hero.is_burned, HeroError::HeroBurned);
 
-    let new_level = hero
-        .level
-        .checked_add(1)
-        .ok_or(HeroError::MathOverflow)?;
+    let new_level = hero.level.checked_add(1).ok_or(HeroError::MathOverflow)?;
     require!(new_level <= MAX_LEVEL, HeroError::MaxLevelReached);
     hero.level = new_level;
     apply_level_up(&mut *hero, randomness)?;

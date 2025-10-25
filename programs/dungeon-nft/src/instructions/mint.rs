@@ -3,10 +3,9 @@ use ephemeral_vrf_sdk::anchor::vrf;
 use ephemeral_vrf_sdk::consts::{DEFAULT_QUEUE, VRF_PROGRAM_IDENTITY};
 use ephemeral_vrf_sdk::instructions::{create_request_randomness_ix, RequestRandomnessParams};
 
-use crate::constants::{CONFIG_SEED, DUNGEON_SEED};
+use crate::constants::{seeded_mint_authority, CONFIG_SEED, DUNGEON_SEED};
 use crate::errors::DungeonError;
 use crate::helpers::{derive_caller_seed, meta};
-use crate::logic::{generate_dungeon, GeneratedDungeon};
 use crate::state::{
     DungeonConfig, DungeonMint, DungeonMintRequested, DungeonMintSettled, DungeonStatus,
 };
@@ -47,15 +46,11 @@ pub fn mint_dungeon(ctx: Context<MintDungeon>) -> Result<()> {
         dungeon.grid_width = grid_width;
         dungeon.grid_height = grid_height;
         dungeon.created_at = now;
-        dungeon.randomness = [0; 32];
         dungeon.metadata = crate::state::DungeonMetadata {
             name: format!("{} #{}", collection_name, mint_id + 1),
             symbol: collection_symbol,
             uri: format!("{}{}", base_uri, mint_id + 1),
         };
-        dungeon.grid.clear();
-        dungeon.rooms.clear();
-        dungeon.edges.clear();
     }
 
     let caller_seed = derive_caller_seed(&payer_key, mint_id)?;
@@ -105,17 +100,8 @@ pub fn callback_mint_dungeon(
             .map_err(|_| DungeonError::InvalidRandomness)?,
     );
 
-    let generated = generate_dungeon(dungeon.grid_width, dungeon.grid_height, seed);
-
-    require!(
-        generated.grid.len()
-            == (dungeon.grid_width as usize)
-                .checked_mul(dungeon.grid_height as usize)
-                .ok_or(DungeonError::MathOverflow)?,
-        DungeonError::InvalidGridData
-    );
-
-    apply_generated_dungeon(dungeon, generated, randomness, seed);
+    dungeon.seed = seed;
+    dungeon.status = DungeonStatus::Ready;
 
     config.completed_mints = config
         .completed_mints
@@ -131,18 +117,59 @@ pub fn callback_mint_dungeon(
     Ok(())
 }
 
-fn apply_generated_dungeon(
-    dungeon: &mut Account<'_, DungeonMint>,
-    generated: GeneratedDungeon,
-    randomness: [u8; 32],
+pub fn mint_dungeon_with_seed(
+    ctx: Context<MintDungeonWithSeed>,
+    owner: Pubkey,
     seed: u32,
-) {
-    dungeon.seed = seed;
-    dungeon.randomness = randomness;
-    dungeon.grid = generated.grid;
-    dungeon.rooms = generated.rooms;
-    dungeon.edges = generated.edges;
+) -> Result<()> {
+    require_keys_eq!(
+        ctx.accounts.authority.key(),
+        seeded_mint_authority(),
+        DungeonError::UnauthorizedSeedAuthority
+    );
+
+    let config = &mut ctx.accounts.config;
+    require!(
+        config.next_mint_id < config.max_supply,
+        DungeonError::MaxSupplyReached
+    );
+
+    let mint_id = config.next_mint_id;
+    config.next_mint_id = config
+        .next_mint_id
+        .checked_add(1)
+        .ok_or(DungeonError::MathOverflow)?;
+
+    let now = Clock::get()?.unix_timestamp;
+
+    let dungeon = &mut ctx.accounts.dungeon;
+    dungeon.owner = owner;
+    dungeon.bump = ctx.bumps.dungeon;
+    dungeon.config = config.key();
+    dungeon.mint_id = mint_id;
     dungeon.status = DungeonStatus::Ready;
+    dungeon.seed = seed;
+    dungeon.grid_width = config.grid_width;
+    dungeon.grid_height = config.grid_height;
+    dungeon.created_at = now;
+    dungeon.metadata = crate::state::DungeonMetadata {
+        name: format!("{} #{}", config.collection_name, mint_id + 1),
+        symbol: config.collection_symbol.clone(),
+        uri: format!("{}{}", config.base_uri, mint_id + 1),
+    };
+
+    config.completed_mints = config
+        .completed_mints
+        .checked_add(1)
+        .ok_or(DungeonError::MathOverflow)?;
+
+    emit!(DungeonMintSettled {
+        payer: owner,
+        dungeon: dungeon.key(),
+        mint_id,
+    });
+
+    Ok(())
 }
 
 #[vrf]
@@ -180,4 +207,21 @@ pub struct CallbackMintDungeon<'info> {
     pub dungeon: Account<'info, DungeonMint>,
     /// CHECK: Provided for logging only.
     pub payer: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MintDungeonWithSeed<'info> {
+    #[account(mut, address = seeded_mint_authority())]
+    pub authority: Signer<'info>,
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, DungeonConfig>,
+    #[account(
+        init,
+        payer = authority,
+        space = DungeonMint::space(config.grid_width, config.grid_height),
+        seeds = [DUNGEON_SEED, config.key().as_ref(), &config.next_mint_id.to_le_bytes()],
+        bump
+    )]
+    pub dungeon: Account<'info, DungeonMint>,
+    pub system_program: Program<'info, System>,
 }

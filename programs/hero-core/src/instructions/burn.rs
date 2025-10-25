@@ -16,6 +16,7 @@ pub fn burn_hero(ctx: Context<BurnHero>, hero_id: u64) -> Result<()> {
     );
     require_eq!(hero.id, hero_id, HeroError::HeroMismatch);
 
+    require!(!hero.locked, HeroError::HeroLocked);
     require!(!hero.is_burned, HeroError::HeroBurned);
     require!(
         hero.owner == ctx.accounts.payer.key(),

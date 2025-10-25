@@ -78,9 +78,6 @@ export type ChainDungeon = {
     symbol: string;
     uri: string;
   };
-  grid: number[];
-  rooms: { x: number; y: number; w: number; h: number }[];
-  edges: { a: number; b: number }[];
 };
 
 export type DungeonConfigState = {
@@ -140,6 +137,12 @@ function mapDungeonAccount(
 ): ChainDungeon {
   const rawStatus = account.status as { ready?: unknown; pending?: unknown };
   const status: "pending" | "ready" = rawStatus.ready ? "ready" : "pending";
+  const extras = account as unknown as {
+    randomness?: number[];
+  };
+  const randomness = Array.isArray(extras.randomness)
+    ? [...extras.randomness]
+    : [];
   return {
     publicKey: pubkey.toBase58(),
     owner: account.owner.toBase58(),
@@ -149,23 +152,12 @@ function mapDungeonAccount(
     gridHeight: Number(account.gridHeight),
     createdAt: Number(account.createdAt),
     seed: Number(account.seed),
-    randomness: [...account.randomness],
+    randomness,
     metadata: {
       name: account.metadata.name,
       symbol: account.metadata.symbol,
       uri: account.metadata.uri,
     },
-    grid: [...account.grid],
-    rooms: account.rooms.map((room) => ({
-      x: Number(room.x),
-      y: Number(room.y),
-      w: Number(room.w),
-      h: Number(room.h),
-    })),
-    edges: account.edges.map((edge) => ({
-      a: Number(edge.a),
-      b: Number(edge.b),
-    })),
   };
 }
 

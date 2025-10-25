@@ -32,4 +32,16 @@ pub enum HeroError {
     InvalidLevelProgression,
     #[msg("Invalid status effect type")]
     InvalidStatusEffect,
+    #[msg("Hero is locked in an adventure")]
+    HeroLocked,
+    #[msg("Adventure signer mismatch")]
+    WrongAdventure,
+    #[msg("Adventure program mismatch")]
+    WrongProgram,
+    #[msg("Hero is not locked")]
+    NotLocked,
+    #[msg("Hero already locked")]
+    AlreadyLocked,
+    #[msg("Seeded mint authority mismatch")]
+    UnauthorizedAuthority,
 }

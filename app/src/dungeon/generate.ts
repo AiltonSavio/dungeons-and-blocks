@@ -1,4 +1,4 @@
-import { Grid, Tile, Rect, Edge, Dungeon } from "./tiles";
+import { Grid, Tile, Rect, Edge } from "./tiles";
 
 export function mulberry32(seed: number) {
   return function () {

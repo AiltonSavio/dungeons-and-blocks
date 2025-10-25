@@ -28,7 +28,7 @@ export class MinimapController {
   private lastTileX = -1;
   private lastTileY = -1;
 
-  constructor(private readonly opts: MinimapOptions) {
+  constructor(opts: MinimapOptions) {
     this.grid = opts.grid;
     this.gridWidth = opts.gridWidth;
     this.gridHeight = opts.gridHeight;

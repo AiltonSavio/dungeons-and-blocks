@@ -98,7 +98,6 @@ export class TownScene extends Phaser.Scene {
   private expandedHeroId?: number;
 
   private goldPanel!: Phaser.GameObjects.Container;
-  private embarkedCTA!: Phaser.GameObjects.Container;
 
   private walletPanel!: Phaser.GameObjects.Container;
   private walletStatusText?: Phaser.GameObjects.Text;
@@ -116,7 +115,6 @@ export class TownScene extends Phaser.Scene {
 
   private plazaCenterX = 0;
   private plazaCenterY = 0;
-  private plazaRadius = 120;
 
   private modalOverlay?: Phaser.GameObjects.Rectangle;
   private modalPanel?: Phaser.GameObjects.Container;
@@ -163,7 +161,6 @@ export class TownScene extends Phaser.Scene {
     const background = renderBackground(this, this.safe, this.worldLayer);
     this.plazaCenterX = background.centerX;
     this.plazaCenterY = background.centerY;
-    this.plazaRadius = background.radius;
 
     this.tooltipManager = new TooltipManager(
       this,
@@ -201,7 +198,7 @@ export class TownScene extends Phaser.Scene {
 
     this.initWalletIntegration();
 
-    this.embarkedCTA = renderEmbarkCTA({
+    renderEmbarkCTA({
       scene: this,
       centerX: this.plazaCenterX,
       centerY: this.plazaCenterY,
@@ -806,6 +803,7 @@ export class TownScene extends Phaser.Scene {
     //     "Simulation attempt failed (this might be expected):",
     //     simErr
     //   );
+    //   throw new Error("Transaction simulation failed.");
     // }
 
     // Sign the transaction

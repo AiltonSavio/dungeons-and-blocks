@@ -8,3 +8,4 @@ test-ledger*
 .yarn
 docs/magicblock
 .env
+dist

@@ -12,7 +12,11 @@ pub fn derive_caller_seed(player: &Pubkey, hero_id: u64) -> Result<[u8; 32]> {
     Ok(hash.0)
 }
 
-pub fn meta(account: &AccountInfo<'_>, is_writable: bool, is_signer: bool) -> SerializableAccountMeta {
+pub fn meta(
+    account: &AccountInfo<'_>,
+    is_writable: bool,
+    is_signer: bool,
+) -> SerializableAccountMeta {
     SerializableAccountMeta {
         pubkey: *account.key,
         is_signer,

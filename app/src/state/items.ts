@@ -43,14 +43,14 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
   minor_torch: {
     id: "minor_torch",
     name: "Torch Bundle",
-    description: "Adds 15% light when used.",
+    description: "Adds 25 light when used.",
     rarity: "common",
     usable: true,
   },
   healing_salve: {
     id: "healing_salve",
     name: "Healing Salve",
-    description: "Restores a small portion of the leader's HP.",
+    description: "Restores a small portion of a hero's HP.",
     rarity: "uncommon",
     usable: true,
   },

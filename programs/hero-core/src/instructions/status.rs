@@ -11,6 +11,7 @@ pub fn apply_status_effect(
 ) -> Result<()> {
     let hero = &mut ctx.accounts.hero_mint;
     require_eq!(hero.id, hero_id, HeroError::HeroMismatch);
+    require!(!hero.locked, HeroError::HeroLocked);
     require!(!hero.is_burned, HeroError::HeroBurned);
     require!(
         effect_type < STATUS_EFFECTS_COUNT,
@@ -35,6 +36,7 @@ pub fn remove_status_effect(
 ) -> Result<()> {
     let hero = &mut ctx.accounts.hero_mint;
     require_eq!(hero.id, hero_id, HeroError::HeroMismatch);
+    require!(!hero.locked, HeroError::HeroLocked);
     require!(!hero.is_burned, HeroError::HeroBurned);
     require!(
         effect_type < STATUS_EFFECTS_COUNT,

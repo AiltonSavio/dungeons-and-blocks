@@ -13,20 +13,21 @@ pub(crate) use instructions::config::{
 };
 pub(crate) use instructions::mint::{
     __client_accounts_callback_mint_dungeon, __client_accounts_mint_dungeon,
+    __client_accounts_mint_dungeon_with_seed,
 };
 pub use instructions::{
     config::{InitializeConfig, UpdateConfig},
-    mint::{CallbackMintDungeon, MintDungeon},
+    mint::{CallbackMintDungeon, MintDungeon, MintDungeonWithSeed},
 };
 
-declare_id!("EXpvktpk2rhQQe38yaq1DaRhTwRUofKzZtE1gZ4Z2JAt");
+declare_id!("3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw");
 
 #[program]
 pub mod dungeon_nft {
     use super::*;
     use instructions::{
         config::{InitializeConfig, UpdateConfig},
-        mint::{CallbackMintDungeon, MintDungeon},
+        mint::{CallbackMintDungeon, MintDungeon, MintDungeonWithSeed},
     };
 
     pub fn initialize_config(
@@ -73,5 +74,13 @@ pub mod dungeon_nft {
         randomness: [u8; 32],
     ) -> Result<()> {
         instructions::mint::callback_mint_dungeon(ctx, randomness)
+    }
+
+    pub fn mint_dungeon_with_seed(
+        ctx: Context<MintDungeonWithSeed>,
+        owner: Pubkey,
+        seed: u32,
+    ) -> Result<()> {
+        instructions::mint::mint_dungeon_with_seed(ctx, owner, seed)
     }
 }
