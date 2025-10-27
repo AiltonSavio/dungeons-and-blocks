@@ -8,7 +8,7 @@ import {
   clusterApiUrl,
 } from "@solana/web3.js";
 import { townStore } from "../state/townStore";
-import { ItemId, TownState, HeroClass } from "../state/models";
+import { ItemId, HeroClass } from "../state/models";
 import { ChainHero, getHeroTypeLabel } from "../state/heroChain";
 import {
   ChainDungeon,
@@ -22,6 +22,7 @@ import {
   fetchAdventureSessionSmart,
   deriveAdventurePda,
   createSetDelegateInstruction,
+  type HeroLockStatus,
 } from "../state/adventureChain";
 import {
   SAFE_MARGIN,
@@ -45,6 +46,7 @@ type HeroRosterSnapshot = {
   heroes: ChainHero[];
   heroesLoading: boolean;
   heroLoadError?: string;
+  heroLockStatuses?: Map<string, HeroLockStatus>;
   walletAddress?: string;
 };
 
@@ -82,7 +84,6 @@ type SolanaProvider = {
 
 export class EmbarkScene extends Phaser.Scene {
   private store = townStore;
-  private state!: TownState;
   private unsubChange?: () => void;
 
   private activeTab: "my" | "community" = "my";
@@ -135,7 +136,6 @@ export class EmbarkScene extends Phaser.Scene {
   }
 
   init(data?: EmbarkSceneLaunchData) {
-    this.state = this.store.getState();
     const snapshot = this.registry.get("town:heroRoster") as
       | HeroRosterSnapshot
       | undefined;
@@ -183,8 +183,7 @@ export class EmbarkScene extends Phaser.Scene {
     this.renderContentArea();
     this.renderFooter();
 
-    this.unsubChange = this.store.subscribe((state) => {
-      this.state = state;
+    this.unsubChange = this.store.subscribe(() => {
       this.refresh();
     });
 
@@ -470,62 +469,73 @@ export class EmbarkScene extends Phaser.Scene {
       this.footerPartyMask = undefined;
       this.footerPartyMaskRect = undefined;
     } else {
-      this.chainHeroes.forEach((hero) => {
-        const key = this.heroKey(hero);
-        const selected = this.partySelection.has(key);
-        const button = this.createFooterChip(
-          0,
-          partyY,
-          PARTY_COL_WIDTH,
-          `Hero #${hero.id} (${getHeroTypeLabel(hero.heroType)})`,
-          () => this.toggleHero(key),
-          selected
+      const availableHeroes = this.chainHeroes;
+
+      if (availableHeroes.length === 0) {
+        addPartyMessage(
+          "All heroes are currently on adventures. Return to town to manage your roster."
         );
-        partyList.add(button);
-        partyY += BUTTON_DIMENSIONS.height + 6;
-      });
-
-      this.footerPartyMaskRect = this.add.rectangle(
-        this.footer.x + PADDING_X + viewportW / 2,
-        this.footer.y + PADDING_Y + listY + visibleH / 2,
-        viewportW,
-        visibleH,
-        0xffffff,
-        0
-      );
-      this.footerPartyMask = this.footerPartyMaskRect.createGeometryMask();
-      partyList.setMask(this.footerPartyMask);
-
-      // Enable wheel scrolling only when overflow
-      const contentH = Math.max(0, partyY);
-      let partyScroll = 0;
-
-      const applyPartyScroll = () => {
-        const maxScroll = Math.max(0, contentH - visibleH);
-        if (maxScroll <= 0) {
-          partyScroll = 0;
-        } else {
-          partyScroll = Phaser.Math.Clamp(partyScroll, -maxScroll, 0);
-        }
-        partyList.y = listY + partyScroll;
-      };
-      applyPartyScroll();
-
-      if (contentH > visibleH) {
-        this.footerWheelHandler = (pointer, _objects, _dx, dy, _dz) => {
-          const px = pointer.worldX ?? pointer.x;
-          const py = pointer.worldY ?? pointer.y;
-          const rect = new Phaser.Geom.Rectangle(
-            this.footer!.x + PADDING_X,
-            this.footer!.y + PADDING_Y + listY,
-            viewportW,
-            visibleH
+        partyList.destroy();
+        this.footerPartyMask = undefined;
+        this.footerPartyMaskRect = undefined;
+      } else {
+        availableHeroes.forEach((hero) => {
+          const key = this.heroKey(hero);
+          const selected = this.partySelection.has(key);
+          const button = this.createFooterChip(
+            0,
+            partyY,
+            PARTY_COL_WIDTH,
+            `Hero #${hero.id} (${getHeroTypeLabel(hero.heroType)})`,
+            () => this.toggleHero(key),
+            selected
           );
-          if (!rect.contains(px, py)) return;
-          partyScroll -= dy * 0.5;
-          applyPartyScroll();
+          partyList.add(button);
+          partyY += BUTTON_DIMENSIONS.height + 6;
+        });
+
+        this.footerPartyMaskRect = this.add.rectangle(
+          this.footer.x + PADDING_X + viewportW / 2,
+          this.footer.y + PADDING_Y + listY + visibleH / 2,
+          viewportW,
+          visibleH,
+          0xffffff,
+          0
+        );
+        this.footerPartyMask = this.footerPartyMaskRect.createGeometryMask();
+        partyList.setMask(this.footerPartyMask);
+
+        // Enable wheel scrolling only when overflow
+        const contentH = Math.max(0, partyY);
+        let partyScroll = 0;
+
+        const applyPartyScroll = () => {
+          const maxScroll = Math.max(0, contentH - visibleH);
+          if (maxScroll <= 0) {
+            partyScroll = 0;
+          } else {
+            partyScroll = Phaser.Math.Clamp(partyScroll, -maxScroll, 0);
+          }
+          partyList.y = listY + partyScroll;
         };
-        this.input.on("wheel", this.footerWheelHandler, this);
+        applyPartyScroll();
+
+        if (contentH > visibleH) {
+          this.footerWheelHandler = (pointer, _objects, _dx, dy, _dz) => {
+            const px = pointer.worldX ?? pointer.x;
+            const py = pointer.worldY ?? pointer.y;
+            const rect = new Phaser.Geom.Rectangle(
+              this.footer!.x + PADDING_X,
+              this.footer!.y + PADDING_Y + listY,
+              viewportW,
+              visibleH
+            );
+            if (!rect.contains(px, py)) return;
+            partyScroll -= dy * 0.5;
+            applyPartyScroll();
+          };
+          this.input.on("wheel", this.footerWheelHandler, this);
+        }
       }
     }
 
@@ -540,7 +550,7 @@ export class EmbarkScene extends Phaser.Scene {
       .setOrigin(0, 0);
     suppliesCol.add(suppliesTitle);
 
-    const items = Object.entries(this.state.inventory.items) as [
+    const items = Object.entries(this.store.getInventory().items) as [
       ItemId,
       number
     ][];
@@ -1190,7 +1200,7 @@ export class EmbarkScene extends Phaser.Scene {
       this.scene.start("game", {
         seed,
         heroes: partyHeroes,
-        supplies: this.state.inventory.items,
+        supplies: this.store.getInventory().items,
         dungeon: selectedDungeon,
         adventure: existingAdventure,
         player: playerKey.toBase58(),
@@ -1322,7 +1332,7 @@ export class EmbarkScene extends Phaser.Scene {
       this.scene.start("game", {
         seed,
         heroes: partyHeroes,
-        supplies: this.state.inventory.items,
+        supplies: this.store.getInventory().items,
         dungeon: selectedDungeon,
         adventure: adventureAccount,
         player: playerKey.toBase58(),

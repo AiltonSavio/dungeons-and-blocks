@@ -732,6 +732,7 @@ dependencies = [
  "anchor-lang",
  "ephemeral-rollups-sdk",
  "ephemeral-vrf-sdk",
+ "player-economy",
 ]
 
 [[package]]
@@ -929,6 +930,13 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "player-economy"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
 ]
 
 [[package]]

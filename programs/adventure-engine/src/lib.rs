@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use dungeon_nft::state::DungeonMint;
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
-use hero_core::program::HeroCore;
 
 use crate::{constants::ADVENTURE_SEED, errors::AdventureError, state::AdventureSession};
 
@@ -42,9 +41,9 @@ pub struct StartAdventure<'info> {
         bump
     )]
     pub adventure: Account<'info, AdventureSession>,
-    #[account(address = hero_core::ID)]
-    pub hero_core_program: Program<'info, HeroCore>,
     pub system_program: Program<'info, System>,
+    /// CHECK: hero-core program for CPI calls
+    pub hero_program: Program<'info, hero_core::program::HeroCore>,
 }
 
 /// Writes the delegate pubkey into the AdventureSession account data.
@@ -62,10 +61,6 @@ pub struct SetDelegate<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
-/// Actually delegates the PDA to the ephemeral rollup.
-/// IMPORTANT: We do NOT pass `Account<AdventureSession>` here to avoid
-/// Anchor attempting to re-serialize anything after delegation.
-/// We also do NOT mutate any PDA data in this instruction.
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateAdventure<'info> {
@@ -117,8 +112,8 @@ pub struct ExitAdventure<'info> {
         constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch
     )]
     pub adventure: Account<'info, AdventureSession>,
-    #[account(address = hero_core::ID)]
-    pub hero_core_program: Program<'info, HeroCore>,
+    /// CHECK: hero-core program for CPI calls
+    pub hero_program: Program<'info, hero_core::program::HeroCore>,
 }
 
 #[ephemeral]
@@ -143,8 +138,8 @@ pub mod adventure_engine {
         crate::instructions::delegate::delegate_adventure(ctx)
     }
 
-    pub fn move_hero(ctx: Context<MoveHero>, hero_index: u8, direction: Direction) -> Result<()> {
-        crate::instructions::movement::move_hero(ctx, hero_index, direction)
+    pub fn move_hero(ctx: Context<MoveHero>, direction: Direction) -> Result<()> {
+        crate::instructions::movement::move_hero(ctx, direction)
     }
 
     pub fn exit_adventure<'info>(

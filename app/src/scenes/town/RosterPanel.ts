@@ -9,6 +9,7 @@ import { ROSTER_WIDTH } from "./constants";
 import { UI_FONT } from "../../ui/uiConfig";
 import { clamp } from "./utils";
 import { formatHeroRowStats, formatHeroTimestamp } from "./heroFormatting";
+import type { HeroLockStatus } from "../../state/adventureChain";
 
 type RosterPanelOptions = {
   scene: Phaser.Scene;
@@ -23,6 +24,7 @@ export type RosterPanelState = {
   heroes: ChainHero[];
   heroesLoading: boolean;
   heroLoadError?: string;
+  heroLockStatuses?: Map<string, HeroLockStatus>;
   expandedHeroId?: number;
 };
 
@@ -339,16 +341,42 @@ export class RosterPanel {
   private createRow(hero: ChainHero) {
     const container = this.scene.add.container(0, 0);
     const width = ROSTER_WIDTH - 48;
+
+    // Check if hero is active in an adventure
+    const lockStatus = this.state.heroLockStatuses?.get(hero.account);
+    const isActive = lockStatus?.isActive ?? false;
+
     const bg = this.scene.add.rectangle(0, 0, width, 84, 0x232737).setOrigin(0);
-    bg.setStrokeStyle(1, 0x3a4052, 1);
+
+    // If hero is active, add glowing red border
+    if (isActive) {
+      bg.setStrokeStyle(2, 0xff4444, 1);
+
+      // Add a pulsing glow effect
+      this.scene.tweens.add({
+        targets: bg,
+        alpha: { from: 1, to: 0.7 },
+        duration: 1000,
+        ease: "Sine.easeInOut",
+        yoyo: true,
+        repeat: -1,
+      });
+    } else {
+      bg.setStrokeStyle(1, 0x3a4052, 1);
+    }
+
     container.add(bg);
 
     bg.setInteractive({ cursor: "pointer" })
       .on("pointerover", () => {
-        bg.setFillStyle(0x2a3043);
+        if (!isActive) {
+          bg.setFillStyle(0x2a3043);
+        }
       })
       .on("pointerout", () => {
-        bg.setFillStyle(0x232737);
+        if (!isActive) {
+          bg.setFillStyle(0x232737);
+        }
       })
       .on("pointerdown", () => {
         const isExpanded = this.state.expandedHeroId === hero.id;

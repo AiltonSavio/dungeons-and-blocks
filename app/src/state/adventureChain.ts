@@ -9,9 +9,13 @@ import {
 } from "@solana/web3.js";
 import adventureIdl from "../../../target/idl/adventure_engine.json";
 import type { AdventureEngine } from "../../../target/types/adventure_engine";
-import { HERO_CORE_PROGRAM_ID } from "./heroChain";
+import { TRAIT_NONE } from "./traitCatalog";
+export { TRAIT_NONE } from "./traitCatalog";
 
 export const ADVENTURE_ENGINE_PROGRAM_ID = new PublicKey(adventureIdl.address);
+export const HERO_CORE_PROGRAM_ID = new PublicKey(
+  "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
+);
 export const DELEGATION_PROGRAM_ID = new PublicKey(
   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 );
@@ -21,10 +25,6 @@ export const MAGIC_PROGRAM_ID = new PublicKey(
 export const MAGIC_CONTEXT_ID = new PublicKey(
   "MagicContext1111111111111111111111111111111"
 );
-export const DEFAULT_VALIDATOR = new PublicKey(
-  "MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd"
-);
-
 const ADVENTURE_SEED = Buffer.from("adventure");
 const HERO_LOCK_SEED = Buffer.from("hero-lock");
 const BUFFER_SEED = Buffer.from("buffer");
@@ -42,7 +42,8 @@ export type ChainAdventure = {
   heroesInside: boolean;
   heroCount: number;
   heroMints: string[];
-  heroPositions: { x: number; y: number }[];
+  heroSnapshots: ChainHeroSnapshot[];
+  partyPosition: { x: number; y: number };
   delegate: string | null;
   width: number;
   height: number;
@@ -58,6 +59,27 @@ export type ChainAdventure = {
   lastExitPosition: { x: number; y: number };
   createdAt: number;
   lastStartedAt: number;
+  torch: number;
+};
+
+export type ChainHeroSnapshot = {
+  heroId: number;
+  heroType: number;
+  level: number;
+  experience: number;
+  maxHp: number;
+  currentHp: number;
+  attack: number;
+  defense: number;
+  magic: number;
+  resistance: number;
+  speed: number;
+  luck: number;
+  statusEffects: number;
+  stress: number;
+  stressMax: number;
+  positiveTraits: number[];
+  negativeTraits: number[];
 };
 
 // Readonly wallet for fetching/readonly program calls
@@ -213,15 +235,35 @@ export async function fetchAdventureSessionSmart(
   }
 }
 
-function mapAdventureAccount(
+export function mapAdventureAccount(
   pubkey: PublicKey,
   account: AdventureSessionAccount
 ): ChainAdventure {
   const width = Number(account.width);
   const height = Number(account.height);
-  const heroPositions = account.heroPositions.map((point) => ({
-    x: Number(point.x),
-    y: Number(point.y),
+  const readTraitSlots = (slots: readonly number[] | Uint8Array | undefined) => {
+    const values = Array.from(slots ?? []);
+    while (values.length < 3) values.push(TRAIT_NONE);
+    return values.map((value) => Number(value));
+  };
+  const heroSnapshots = account.heroSnapshots.map((snapshot) => ({
+    heroId: Number(snapshot.heroId),
+    heroType: Number(snapshot.heroType),
+    level: Number(snapshot.level),
+    experience: Number(snapshot.experience),
+    maxHp: Number(snapshot.maxHp),
+    currentHp: Number(snapshot.currentHp),
+    attack: Number(snapshot.attack),
+    defense: Number(snapshot.defense),
+    magic: Number(snapshot.magic),
+    resistance: Number(snapshot.resistance),
+    speed: Number(snapshot.speed),
+    luck: Number(snapshot.luck),
+    statusEffects: Number(snapshot.statusEffects),
+    stress: Number(snapshot.stress),
+    stressMax: Number(snapshot.stressMax),
+    positiveTraits: readTraitSlots(snapshot.positiveTraits),
+    negativeTraits: readTraitSlots(snapshot.negativeTraits),
   }));
   const rooms = account.rooms.map((room) => ({
     x: Number(room.x),
@@ -251,7 +293,11 @@ function mapAdventureAccount(
     heroesInside: account.heroesInside,
     heroCount: Number(account.heroCount),
     heroMints: account.heroMints.map((mint) => mint.toBase58()),
-    heroPositions,
+    heroSnapshots,
+    partyPosition: {
+      x: Number(account.partyPosition.x),
+      y: Number(account.partyPosition.y),
+    },
     delegate: account.delegate ? account.delegate.toBase58() : null,
     width,
     height,
@@ -270,6 +316,7 @@ function mapAdventureAccount(
     },
     createdAt: Number(account.createdAt),
     lastStartedAt: Number(account.lastStartedAt),
+    torch: Number(account.torch),
   };
 }
 
@@ -305,8 +352,8 @@ export async function createStartAdventureInstruction(options: {
       player,
       dungeon: dungeonMint,
       adventure: adventurePda,
-      heroCoreProgram: HERO_CORE_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
+      heroProgram: HERO_CORE_PROGRAM_ID,
     })
     .remainingAccounts(remainingAccounts)
     .instruction();
@@ -329,7 +376,7 @@ export async function createSetDelegateInstruction(options: {
 
   const instruction = await program.methods
     .setDelegate(delegate ?? null)
-    .accounts({
+    .accountsPartial({
       payer,
       adventure: adventurePda,
     })
@@ -344,21 +391,61 @@ export async function createDelegateAdventureInstruction(options: {
   adventurePda: PublicKey;
   owner: PublicKey;
   dungeonMint: PublicKey;
+  validator?: PublicKey;
 }): Promise<{ instruction: TransactionInstruction }> {
-  const { connection, payer, adventurePda, owner, dungeonMint } = options;
+  const { connection, payer, adventurePda, owner, dungeonMint, validator } =
+    options;
   const program = getAdventureProgram(connection, payer);
+
+  const remainingAccounts = validator
+    ? [{ pubkey: validator, isSigner: false, isWritable: false }]
+    : [];
 
   const instruction = await program.methods
     .delegateAdventure()
-    .accounts({
+    .accountsPartial({
       payer,
       pda: adventurePda,
       owner,
       dungeonMint,
     })
+    .remainingAccounts(remainingAccounts)
     .instruction();
 
   return { instruction };
+}
+
+export async function createProcessUndelegationInstruction(options: {
+  connection: Connection;
+  payer: PublicKey;
+  adventurePda: PublicKey;
+  owner: PublicKey;
+  dungeonMint: PublicKey;
+}): Promise<{
+  instruction: TransactionInstruction;
+  bufferPda: PublicKey;
+}> {
+  const { connection, payer, adventurePda, owner, dungeonMint } = options;
+  const program = getAdventureProgram(connection, payer);
+
+  const accountSeeds = [
+    ADVENTURE_SEED,
+    owner.toBuffer(),
+    dungeonMint.toBuffer(),
+  ];
+  const [bufferPda] = deriveAdventureBufferPda(adventurePda);
+
+  const instruction = await program.methods
+    .processUndelegation(accountSeeds)
+    .accountsPartial({
+      baseAccount: adventurePda,
+      buffer: bufferPda,
+      payer,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  return { instruction, bufferPda };
 }
 
 // ---------- Moves ----------
@@ -419,14 +506,12 @@ export async function createMoveHeroInstruction(options: {
   owner: PublicKey;
   authority: PublicKey;
   adventurePda: PublicKey;
-  heroIndex: number;
   direction: AdventureDirection;
 }): Promise<TransactionInstruction> {
-  const { connection, owner, authority, adventurePda, heroIndex, direction } =
-    options;
+  const { connection, owner, authority, adventurePda, direction } = options;
   const program = getAdventureProgram(connection, owner);
   const instruction = await program.methods
-    .moveHero(heroIndex, directionVariant(direction))
+    .moveHero(directionVariant(direction))
     .accountsPartial({
       owner,
       authority,
@@ -435,4 +520,136 @@ export async function createMoveHeroInstruction(options: {
     .instruction();
 
   return instruction;
+}
+
+export async function createExitAdventureInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventurePda: PublicKey;
+  heroMints: PublicKey[];
+  fromEphemeral?: boolean;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventurePda, heroMints } = options;
+  const program = getAdventureProgram(connection, owner);
+
+  // Always pass hero accounts to unlock them via CPI to hero-core
+  // The #[commit] macro allows us to modify non-delegated accounts during commit
+  const remainingAccounts = heroMints.flatMap((heroMint) => {
+    const [heroLockPda] = deriveHeroLockPda(heroMint);
+    return [
+      { pubkey: heroMint, isSigner: false, isWritable: true },
+      { pubkey: heroLockPda, isSigner: false, isWritable: true },
+    ];
+  });
+
+  const instruction = await program.methods
+    .exitAdventure()
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventurePda,
+      heroProgram: HERO_CORE_PROGRAM_ID,
+      magicProgram: MAGIC_PROGRAM_ID,
+      magicContext: MAGIC_CONTEXT_ID,
+    })
+    .remainingAccounts(remainingAccounts)
+    .instruction();
+
+  return instruction;
+}
+
+export type HeroLockStatus = {
+  heroMint: string;
+  isActive: boolean;
+  adventure?: string;
+  lastUpdated: number;
+};
+
+/**
+ * Fetch hero lock status for multiple heroes
+ * Returns a map of hero mint address to lock status
+ */
+export async function fetchHeroLockStatuses(
+  connection: Connection,
+  heroMints: PublicKey[]
+): Promise<Map<string, HeroLockStatus>> {
+  const statusMap = new Map<string, HeroLockStatus>();
+
+  if (heroMints.length === 0) {
+    return statusMap;
+  }
+
+  const lockPdas = heroMints.map((mint) => deriveHeroLockPda(mint)[0]);
+
+  try {
+    const accountInfos = await connection.getMultipleAccountsInfo(lockPdas);
+
+    heroMints.forEach((heroMint, index) => {
+      const accountInfo = accountInfos[index];
+      const heroMintStr = heroMint.toBase58();
+
+      if (!accountInfo || !accountInfo.data || accountInfo.data.length < 8) {
+        // No lock account exists, hero is not locked
+        statusMap.set(heroMintStr, {
+          heroMint: heroMintStr,
+          isActive: false,
+          lastUpdated: 0,
+        });
+        return;
+      }
+
+      try {
+        // Decode HeroAdventureLock account
+        // Layout: discriminator(8) + hero_mint(32) + owner(32) + adventure(32) + bump(1) + is_active(1) + last_updated(8) + reserved(7)
+        const data = accountInfo.data;
+        let offset = 8; // Skip discriminator
+
+        // Skip hero_mint
+        offset += 32;
+        // Skip owner
+        offset += 32;
+
+        // Read adventure
+        const adventure = new PublicKey(data.subarray(offset, offset + 32));
+        offset += 32;
+
+        // Skip bump
+        offset += 1;
+
+        // Read is_active
+        const isActive = data[offset] === 1;
+        offset += 1;
+
+        // Read last_updated
+        const lastUpdated = Number(data.readBigInt64LE(offset));
+
+        statusMap.set(heroMintStr, {
+          heroMint: heroMintStr,
+          isActive,
+          adventure: adventure.equals(PublicKey.default) ? undefined : adventure.toBase58(),
+          lastUpdated,
+        });
+      } catch (err) {
+        console.warn(`Failed to decode lock for hero ${heroMintStr}:`, err);
+        statusMap.set(heroMintStr, {
+          heroMint: heroMintStr,
+          isActive: false,
+          lastUpdated: 0,
+        });
+      }
+    });
+  } catch (err) {
+    console.error("Failed to fetch hero lock statuses:", err);
+    // Return empty status for all heroes on error
+    heroMints.forEach((heroMint) => {
+      statusMap.set(heroMint.toBase58(), {
+        heroMint: heroMint.toBase58(),
+        isActive: false,
+        lastUpdated: 0,
+      });
+    });
+  }
+
+  return statusMap;
 }

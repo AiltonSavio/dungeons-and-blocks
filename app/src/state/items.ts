@@ -16,6 +16,8 @@ export type ItemDefinition = {
   rarity: ItemRarity;
   maxStack?: number;
   usable?: boolean;
+  buyPrice?: number;
+  sellPrice?: number;
 };
 
 export type InventoryItem = {
@@ -32,13 +34,16 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
     description: "Redeem for a burst of 25 gold.",
     rarity: "common",
     usable: false,
+    sellPrice: 25,
   },
   stress_tonic: {
     id: "stress_tonic",
     name: "Stress Tonic",
-    description: "Consumes to reduce party stress.",
+    description: "Consumes to clear 20 stress from all allies.",
     rarity: "uncommon",
     usable: true,
+    buyPrice: 21,
+    sellPrice: 10,
   },
   minor_torch: {
     id: "minor_torch",
@@ -46,6 +51,8 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
     description: "Adds 25 light when used.",
     rarity: "common",
     usable: true,
+    buyPrice: 14,
+    sellPrice: 7,
   },
   healing_salve: {
     id: "healing_salve",
@@ -53,6 +60,8 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
     description: "Restores a small portion of a hero's HP.",
     rarity: "uncommon",
     usable: true,
+    buyPrice: 32,
+    sellPrice: 16,
   },
   mystery_relic: {
     id: "mystery_relic",
@@ -60,14 +69,16 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
     description: "Sell in town for profit. Not usable in the field.",
     rarity: "rare",
     usable: false,
+    sellPrice: 70,
   },
   calming_incense: {
     id: "calming_incense",
     name: "Calming Incense",
-    description: "Soothing aroma that clears 20 stress from all allies.",
+    description: "Removes one active status effect from a hero.",
     rarity: "rare",
     usable: true,
     maxStack: 3,
+    sellPrice: 45,
   },
   phoenix_feather: {
     id: "phoenix_feather",
@@ -76,6 +87,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
     rarity: "rare",
     usable: true,
     maxStack: 1,
+    sellPrice: 110,
   },
 };
 

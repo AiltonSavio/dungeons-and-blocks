@@ -20,7 +20,7 @@ impl Direction {
     }
 }
 
-pub fn move_hero(ctx: Context<MoveHero>, hero_index: u8, direction: Direction) -> Result<()> {
+pub fn move_hero(ctx: Context<MoveHero>, direction: Direction) -> Result<()> {
     let adventure = &mut ctx.accounts.adventure;
     let authority = ctx.accounts.authority.key();
     let owner = ctx.accounts.owner.key();
@@ -32,14 +32,8 @@ pub fn move_hero(ctx: Context<MoveHero>, hero_index: u8, direction: Direction) -
     require!(adventure.is_active, AdventureError::AdventureNotActive);
     require!(adventure.heroes_inside, AdventureError::AdventureNotActive);
 
-    let idx = hero_index as usize;
-    require!(
-        idx < adventure.hero_count as usize,
-        AdventureError::HeroIndexOutOfRange
-    );
-
     let (dx, dy) = direction.delta();
-    let current = adventure.hero_positions[idx];
+    let current = adventure.party_position;
     let next_x = current.x as i32 + dx as i32;
     let next_y = current.y as i32 + dy as i32;
 
@@ -60,10 +54,13 @@ pub fn move_hero(ctx: Context<MoveHero>, hero_index: u8, direction: Direction) -
         AdventureError::MovementIntoWall
     );
 
-    adventure.hero_positions[idx] = DungeonPoint {
+    adventure.party_position = DungeonPoint {
         x: next_x_u16,
         y: next_y_u16,
     };
+
+    // Decrement torch by 1 on each move, but don't go below 0
+    adventure.torch = adventure.torch.saturating_sub(1);
 
     Ok(())
 }

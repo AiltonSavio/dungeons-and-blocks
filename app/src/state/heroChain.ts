@@ -5,14 +5,18 @@ import {
   SYSVAR_SLOT_HASHES_PUBKEY,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { BorshInstructionCoder, BN } from "@coral-xyz/anchor";
 import { Buffer } from "buffer";
 import heroIdl from "../../../target/idl/hero_core.json";
+import {
+  PLAYER_ECONOMY_PROGRAM_ID,
+  derivePlayerEconomyPda,
+} from "./economyChain";
 
 export const HERO_CORE_PROGRAM_ID = new PublicKey(heroIdl.address);
 
 const PLAYER_PROFILE_SEED = Buffer.from("player");
 const HERO_SEED = Buffer.from("hero");
-const GOLD_ACCOUNT_SEED = Buffer.from("gold");
 const GAME_VAULT_SEED = Buffer.from("vault");
 const VRF_IDENTITY_SEED = Buffer.from("identity");
 
@@ -26,13 +30,15 @@ const VRF_PROGRAM_ID = new PublicKey(
 );
 
 const EXPERIENCE_THRESHOLDS = [0, 0, 100, 300, 600, 1000];
+export const HERO_BLACKSMITH_COST = 30;
+export const HERO_BLACKSMITH_MAX_REROLLS = 3;
+export const HERO_ABBEY_COST = 10;
+export const HERO_TAVERN_HEAL_COST_PER_HP = 1;
+export const HERO_SANITARIUM_STATUS_CURE_COST = 10;
+export const HERO_SANITARIUM_TRAIT_CURE_COST = 25;
 
-const DISCRIMINATOR = {
-  initializePlayer: Buffer.from([79, 249, 88, 177, 220, 62, 56, 128]),
-  mintHeroFree: Buffer.from([26, 28, 214, 62, 10, 87, 144, 66]),
-  mintHeroPaid: Buffer.from([157, 18, 206, 107, 36, 236, 5, 91]),
-  levelUpHero: Buffer.from([190, 123, 111, 190, 184, 74, 34, 137]),
-};
+// Use Anchor's instruction coder instead of manual discriminators
+const instructionCoder = new BorshInstructionCoder(heroIdl as any);
 
 export type ChainHeroSkill = {
   id: number;
@@ -55,6 +61,14 @@ export type ChainHero = {
   speed: number;
   luck: number;
   statusEffects: number;
+  stress: number;
+  stressMax: number;
+  rerollCount: number;
+  blessed: boolean;
+  locked: boolean;
+  lockedAdventure: string;
+  lockedProgram: string;
+  lockedSince: number;
   skills: ChainHeroSkill[];
   positiveQuirks: number[];
   negativeQuirks: number[];
@@ -198,13 +212,6 @@ export function deriveHeroMintPda(
   );
 }
 
-export function deriveGoldAccountPda(owner: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [GOLD_ACCOUNT_SEED, owner.toBuffer()],
-    HERO_CORE_PROGRAM_ID
-  );
-}
-
 export function deriveGameVaultPda(): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [GAME_VAULT_SEED],
@@ -237,6 +244,8 @@ export function createInitializePlayerInstruction(
   owner: PublicKey
 ): TransactionInstruction {
   const [profilePda] = derivePlayerProfilePda(owner);
+  const data = instructionCoder.encode("initialize_player", {});
+
   return new TransactionInstruction({
     programId: HERO_CORE_PROGRAM_ID,
     keys: [
@@ -244,7 +253,7 @@ export function createInitializePlayerInstruction(
       { pubkey: profilePda, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
-    data: DISCRIMINATOR.initializePlayer,
+    data,
   });
 }
 
@@ -265,18 +274,43 @@ export function createMintHeroInstruction(options: {
   );
 
   if (mintType === "free") {
+    const data = instructionCoder.encode("mint_hero_free", {});
+
     const keys = [
       { pubkey: owner, isSigner: true, isWritable: true },
       { pubkey: profilePda, isSigner: false, isWritable: true },
       { pubkey: heroMint, isSigner: false, isWritable: true },
       { pubkey: oracleQueue, isSigner: false, isWritable: true },
-      { pubkey: programIdentity, isSigner: false, isWritable: false },
+      { pubkey: programIdentity, isSigner: false, isWritable: true },
       { pubkey: VRF_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SYSVAR_SLOT_HASHES_PUBKEY, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ];
 
-    const data = Buffer.concat([DISCRIMINATOR.mintHeroFree]);
+    return {
+      instruction: new TransactionInstruction({
+        programId: HERO_CORE_PROGRAM_ID,
+        keys,
+        data,
+      }),
+      heroMint,
+    };
+  } else {
+    const [playerEconomy] = derivePlayerEconomyPda(owner);
+    const data = instructionCoder.encode("mint_hero_paid", {});
+
+    const keys = [
+      { pubkey: owner, isSigner: true, isWritable: true },
+      { pubkey: profilePda, isSigner: false, isWritable: true },
+      { pubkey: heroMint, isSigner: false, isWritable: true },
+      { pubkey: oracleQueue, isSigner: false, isWritable: true },
+      { pubkey: programIdentity, isSigner: false, isWritable: true },
+      { pubkey: playerEconomy, isSigner: false, isWritable: true },
+      { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: VRF_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_SLOT_HASHES_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ];
 
     return {
       instruction: new TransactionInstruction({
@@ -287,61 +321,236 @@ export function createMintHeroInstruction(options: {
       heroMint,
     };
   }
-
-  // Paid mint path
-  const [goldAccount] = deriveGoldAccountPda(owner);
-  const [gameVault] = deriveGameVaultPda();
-
-  const keys = [
-    { pubkey: owner, isSigner: true, isWritable: true },
-    { pubkey: profilePda, isSigner: false, isWritable: true },
-    { pubkey: heroMint, isSigner: false, isWritable: true },
-    { pubkey: oracleQueue, isSigner: false, isWritable: true },
-    { pubkey: goldAccount, isSigner: false, isWritable: true },
-    { pubkey: gameVault, isSigner: false, isWritable: true },
-    { pubkey: programIdentity, isSigner: false, isWritable: false },
-    { pubkey: VRF_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: SYSVAR_SLOT_HASHES_PUBKEY, isSigner: false, isWritable: false },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-  ];
-
-  const data = Buffer.concat([DISCRIMINATOR.mintHeroPaid]);
-
-  return {
-    instruction: new TransactionInstruction({
-      programId: HERO_CORE_PROGRAM_ID,
-      keys,
-      data,
-    }),
-    heroMint,
-  };
 }
 
-export function createLevelUpInstruction(options: {
+export function createLevelUpHeroInstruction(options: {
   owner: PublicKey;
   heroId: bigint | number;
 }): TransactionInstruction {
   const { owner, heroId } = options;
   const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
   const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner); // ADD THIS
   const oracleQueue = getVrfOracleAddress();
+
   const [programIdentity] = PublicKey.findProgramAddressSync(
-    [VRF_IDENTITY_SEED],
+    [Buffer.from("identity")],
     HERO_CORE_PROGRAM_ID
   );
 
-  const heroIdBuffer = Buffer.alloc(8);
-  heroIdBuffer.writeBigUInt64LE(heroIdBigInt);
-
-  const data = Buffer.concat([DISCRIMINATOR.levelUpHero, heroIdBuffer]);
+  const data = instructionCoder.encode("level_up_hero", {
+    hero_id: new BN(heroIdBigInt.toString()),
+  });
 
   const keys = [
     { pubkey: owner, isSigner: true, isWritable: true },
     { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
     { pubkey: oracleQueue, isSigner: false, isWritable: true },
-    { pubkey: programIdentity, isSigner: false, isWritable: false },
+    { pubkey: programIdentity, isSigner: false, isWritable: true },
     { pubkey: VRF_PROGRAM_ID, isSigner: false, isWritable: false },
     { pubkey: SYSVAR_SLOT_HASHES_PUBKEY, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createRerollStatsInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+}): TransactionInstruction {
+  const { owner, heroId } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner);
+
+  const data = instructionCoder.encode("reroll_stats", {
+    hero_id: new BN(heroIdBigInt.toString()),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createRelieveStressInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+}): TransactionInstruction {
+  const { owner, heroId } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner);
+
+  const data = instructionCoder.encode("relieve_stress", {
+    hero_id: new BN(heroIdBigInt.toString()),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createApplyBlessingInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+}): TransactionInstruction {
+  const { owner, heroId } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner);
+
+  const data = instructionCoder.encode("apply_blessing", {
+    hero_id: new BN(heroIdBigInt.toString()),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createHealHeroInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+  amount: number;
+}): TransactionInstruction {
+  const { owner, heroId, amount } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner);
+
+  const data = instructionCoder.encode("heal_hero", {
+    hero_id: new BN(heroIdBigInt.toString()),
+    amount: Math.max(0, Math.min(255, Math.floor(amount))),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createBurnHeroInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+}): TransactionInstruction {
+  const { owner, heroId } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerProfile] = derivePlayerProfilePda(owner);
+
+  const data = instructionCoder.encode("burn_hero", {
+    hero_id: new BN(heroIdBigInt.toString()),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: playerProfile, isSigner: false, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createCureStatusEffectInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+  effectType: number;
+}): TransactionInstruction {
+  const { owner, heroId, effectType } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner);
+
+  const data = instructionCoder.encode("cure_status_effect", {
+    hero_id: new BN(heroIdBigInt.toString()),
+    effect_type: Math.max(0, Math.min(255, Math.floor(effectType))),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  return new TransactionInstruction({
+    programId: HERO_CORE_PROGRAM_ID,
+    keys,
+    data,
+  });
+}
+
+export function createCureNegativeTraitInstruction(options: {
+  owner: PublicKey;
+  heroId: bigint | number;
+  traitIndex: number;
+}): TransactionInstruction {
+  const { owner, heroId, traitIndex } = options;
+  const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
+  const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
+  const [playerEconomy] = derivePlayerEconomyPda(owner);
+
+  const data = instructionCoder.encode("cure_negative_trait", {
+    hero_id: new BN(heroIdBigInt.toString()),
+    trait_index: Math.max(0, Math.min(255, Math.floor(traitIndex))),
+  });
+
+  const keys = [
+    { pubkey: owner, isSigner: true, isWritable: true },
+    { pubkey: heroMint, isSigner: false, isWritable: true },
+    { pubkey: playerEconomy, isSigner: false, isWritable: true },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
   ];
 
@@ -355,31 +564,58 @@ export function createLevelUpInstruction(options: {
 function decodeHeroMint(account: PublicKey, data: Buffer): ChainHero {
   let offset = 8; // account discriminator
 
-  const owner = new PublicKey(data.subarray(offset, offset + 32));
-  offset += 32;
+  const safeRead = (length: number): Buffer | null => {
+    if (offset + length > data.length) {
+      return null;
+    }
+    const slice = data.subarray(offset, offset + length);
+    offset += length;
+    return slice;
+  };
 
-  // bump
-  offset += 1;
+  const readU8 = (): number | null => {
+    const bytes = safeRead(1);
+    return bytes ? bytes[0] : null;
+  };
 
-  const id = Number(data.readBigUInt64LE(offset));
-  offset += 8;
+  const readU16 = (): number | null => {
+    const bytes = safeRead(2);
+    return bytes ? bytes.readUInt16LE(0) : null;
+  };
 
-  const heroType = data[offset++];
-  const level = data[offset++];
+  const readI64 = (): number | null => {
+    const bytes = safeRead(8);
+    if (!bytes) return null;
+    return Number(bytes.readBigInt64LE(0));
+  };
 
-  const experience = Number(data.readBigUInt64LE(offset));
-  offset += 8;
+  const readU64 = (): number | null => {
+    const bytes = safeRead(8);
+    if (!bytes) return null;
+    return Number(bytes.readBigUInt64LE(0));
+  };
 
-  const maxHp = data[offset++];
-  const currentHp = data[offset++];
-  const attack = data[offset++];
-  const defense = data[offset++];
-  const magic = data[offset++];
-  const resistance = data[offset++];
-  const speed = data[offset++];
-  const luck = data[offset++];
+  const ownerBytes = safeRead(32);
+  const owner = ownerBytes ? new PublicKey(ownerBytes) : PublicKey.default;
 
-  const statusEffects = data[offset++];
+  safeRead(1); // bump
+
+  const id = readU64() ?? 0;
+  const heroType = readU8() ?? 0;
+  const level = readU8() ?? 0;
+
+  const experience = readU64() ?? 0;
+
+  const maxHp = readU8() ?? 0;
+  const currentHp = readU8() ?? 0;
+  const attack = readU8() ?? 0;
+  const defense = readU8() ?? 0;
+  const magic = readU8() ?? 0;
+  const resistance = readU8() ?? 0;
+  const speed = readU8() ?? 0;
+  const luck = readU8() ?? 0;
+
+  const statusEffects = readU8() ?? 0;
 
   const skill1 = decodeSkill(data, offset);
   offset = skill1.nextOffset;
@@ -393,15 +629,57 @@ function decodeHeroMint(account: PublicKey, data: Buffer): ChainHero {
   const negativeQuirks = decodeQuirkArray(data, offset, 3);
   offset = negativeQuirks.nextOffset;
 
-  const isSoulbound = data[offset++] === 1;
-  const isBurned = data[offset++] === 1;
+  const isSoulbound = (readU8() ?? 0) === 1;
+  const isBurned = (readU8() ?? 0) === 1;
 
-  const mintTimestamp = Number(data.readBigInt64LE(offset));
-  offset += 8;
-  const lastLevelUp = Number(data.readBigInt64LE(offset));
-  offset += 8;
+  const mintTimestamp = readI64() ?? 0;
+  const lastLevelUp = readI64() ?? 0;
 
-  const pendingRequest = data[offset++];
+  const pendingRequest = readU8() ?? 0;
+
+  let locked = false;
+  let lockedAdventure = PublicKey.default;
+  let lockedProgram = PublicKey.default;
+  let lockedSince = 0;
+  let stress = 0;
+  let stressMax = 200;
+  let rerollCount = 0;
+  let blessed = false;
+
+  const lockedFlag = readU8();
+  if (lockedFlag !== null) {
+    locked = lockedFlag === 1;
+    const adventureBytes = safeRead(32);
+    if (adventureBytes) {
+      lockedAdventure = new PublicKey(adventureBytes);
+    }
+    const programBytes = safeRead(32);
+    if (programBytes) {
+      lockedProgram = new PublicKey(programBytes);
+    }
+    const sinceValue = readI64();
+    if (sinceValue !== null) {
+      lockedSince = sinceValue;
+    }
+    const stressValue = readU16();
+    if (stressValue !== null) {
+      stress = stressValue;
+    }
+    const stressCap = readU16();
+    if (stressCap !== null) {
+      stressMax = stressCap;
+    }
+    const rerolls = readU8();
+    if (rerolls !== null) {
+      rerollCount = rerolls;
+    }
+    const blessedFlag = readU8();
+    if (blessedFlag !== null) {
+      blessed = blessedFlag === 1;
+    }
+    // consume padding if present
+    safeRead(25);
+  }
 
   return {
     account: account.toBase58(),
@@ -419,6 +697,14 @@ function decodeHeroMint(account: PublicKey, data: Buffer): ChainHero {
     speed,
     luck,
     statusEffects,
+    stress,
+    stressMax,
+    rerollCount,
+    blessed,
+    locked,
+    lockedAdventure: lockedAdventure.toBase58(),
+    lockedProgram: lockedProgram.toBase58(),
+    lockedSince,
     skills: [skill1.skill, skill2.skill],
     positiveQuirks: positiveQuirks.values,
     negativeQuirks: negativeQuirks.values,

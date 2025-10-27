@@ -25,6 +25,7 @@ import {
   createElementalProfile,
   STATUS_EFFECT_LIBRARY,
 } from "./heroStats";
+import { ITEM_DEFINITIONS } from "./items";
 
 const STORAGE_KEY = "pd-town-state-v1";
 
@@ -792,14 +793,15 @@ function migrateTownState(state: TownState): TownState {
 
 function createDefaultInventory(): Inventory {
   return {
-    gold: 1000,
+    gold: 0,
     items: {
-      torch: 6,
-      potion: 3,
-      bandage: 4,
-      antidote: 2,
-      elixir: 1,
-      food: 10,
+      pouch_gold: 0,
+      stress_tonic: 0,
+      minor_torch: 0,
+      healing_salve: 0,
+      mystery_relic: 0,
+      calming_incense: 0,
+      phoenix_feather: 0,
     },
   };
 }
@@ -861,7 +863,6 @@ function createDefaultHeroes(): Hero[] {
 function createDefaultState(): TownState {
   return {
     heroes: createDefaultHeroes(),
-    inventory: createDefaultInventory(),
     customDungeons: [
       {
         id: dungeonId(),
@@ -872,23 +873,17 @@ function createDefaultState(): TownState {
       },
     ],
     lastCommunityUpdate: Date.now(),
-    suppliesReserve: {
-      torch: 4,
-      potion: 2,
-      bandage: 3,
-      antidote: 1,
-      elixir: 0,
-      food: 6,
-    },
   };
 }
 
 export class TownStore {
   private state: TownState;
+  private inventory: Inventory; // In-memory only, sourced from blockchain
   private emitter = new Phaser.Events.EventEmitter();
 
   constructor() {
     this.state = this.loadState();
+    this.inventory = createDefaultInventory();
   }
 
   private loadState(): TownState {
@@ -934,12 +929,29 @@ export class TownStore {
     this.emitter.emit("toast", message);
   }
 
+  getInventory(): Inventory {
+    return { ...this.inventory };
+  }
+
+  creditGold(amount: number) {
+    const delta = Math.max(0, Math.floor(amount));
+    if (delta <= 0) return;
+    this.inventory.gold += delta;
+    this.emitChange();
+  }
+
+  syncInventoryFromChain(gold: number, items: Record<ItemId, number>) {
+    this.inventory.gold = gold;
+    this.inventory.items = { ...items };
+    this.emitChange();
+  }
+
   recruitHero(): StoreResult {
     if (this.state.heroes.length >= MAX_HEROES) {
       return { ok: false, message: "Hero roster is at maximum capacity." };
     }
     const cost = 100;
-    if (this.state.inventory.gold < cost) {
+    if (this.inventory.gold < cost) {
       return { ok: false, message: "Not enough gold to recruit." };
     }
     const clsPool: HeroClass[] = [
@@ -956,7 +968,7 @@ export class TownStore {
     const name = HERO_NAMES[Math.floor(Math.random() * HERO_NAMES.length)];
     const hero = createBaseHero(cls, name);
     this.state.heroes.push(hero);
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     this.emitChange();
     return { ok: true, message: `${hero.name} has joined the roster.` };
   }
@@ -965,11 +977,11 @@ export class TownStore {
     const hero = this.state.heroes.find((h) => h.id === heroId);
     if (!hero) return { ok: false, message: "Hero not found." };
     const cost = 25;
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold to rest." };
     const stressBefore = hero.stress;
     hero.stress = clamp(hero.stress - 30, 0, 100);
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     this.emitChange();
     const reduced = stressBefore - hero.stress;
     return { ok: true, message: `${hero.name} recovers ${reduced} stress.` };
@@ -983,9 +995,9 @@ export class TownStore {
     if (!hasAffliction && !hasDisease)
       return { ok: false, message: "No afflictions to cure." };
     const cost = 60;
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold for treatment." };
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     const success = Math.random() > 0.2;
     if (!success) {
       this.emitChange();
@@ -1012,14 +1024,14 @@ export class TownStore {
     if (hero.weaponLevel >= maxTier)
       return { ok: false, message: "Weapon already masterworked." };
     const cost = 50 * hero.weaponLevel;
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold for weapon upgrade." };
     hero.weaponLevel += 1;
     hero.coreStats.atk += 1;
     hero.coreStats.hpMax += 2;
     hero.maxHp = hero.coreStats.hpMax;
     hero.hp = Math.min(hero.hp + 4, hero.maxHp);
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     this.emitChange();
     return {
       ok: true,
@@ -1034,14 +1046,14 @@ export class TownStore {
     if (hero.armorLevel >= maxTier)
       return { ok: false, message: "Armor already reinforced." };
     const cost = 50 * hero.armorLevel;
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold for armor upgrade." };
     hero.armorLevel += 1;
     hero.coreStats.def += 1;
     hero.coreStats.hpMax += 4;
     hero.maxHp = hero.coreStats.hpMax;
     hero.hp = Math.min(hero.hp + 6, hero.maxHp);
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     this.emitChange();
     return {
       ok: true,
@@ -1058,9 +1070,9 @@ export class TownStore {
     if (skill.owned)
       return { ok: false, message: `${skill.name} already learned.` };
     const cost = 75;
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold to learn skill." };
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     skill.owned = true;
     skill.level = 1;
     if (hero.activeSkillIds.length < MAX_ACTIVE_SKILLS) {
@@ -1079,9 +1091,9 @@ export class TownStore {
     if (skill.level >= skill.maxLevel)
       return { ok: false, message: "Skill already at maximum level." };
     const cost = 40 * (skill.level + 1);
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold to upgrade skill." };
-    this.state.inventory.gold -= cost;
+    this.inventory.gold -= cost;
     skill.level += 1;
     this.emitChange();
     return {
@@ -1111,25 +1123,29 @@ export class TownStore {
 
   marketBuy(itemId: ItemId, quantity: number): StoreResult {
     const def = MARKET_ITEMS.find((i) => i.id === itemId);
-    if (!def) return { ok: false, message: "Item unavailable." };
+    if (!def || typeof def.buyPrice !== "number")
+      return { ok: false, message: "Item unavailable." };
+    if (quantity <= 0) return { ok: false, message: "Invalid quantity." };
     const cost = def.buyPrice * quantity;
-    if (this.state.inventory.gold < cost)
+    if (this.inventory.gold < cost)
       return { ok: false, message: "Not enough gold." };
-    this.state.inventory.gold -= cost;
-    this.state.inventory.items[itemId] =
-      (this.state.inventory.items[itemId] || 0) + quantity;
+    this.inventory.gold -= cost;
+    this.inventory.items[itemId] =
+      (this.inventory.items[itemId] || 0) + quantity;
     this.emitChange();
     return { ok: true, message: `Purchased ${quantity} × ${def.name}.` };
   }
 
   marketSell(itemId: ItemId, quantity: number): StoreResult {
-    const def = MARKET_ITEMS.find((i) => i.id === itemId);
-    if (!def) return { ok: false, message: "Item unavailable." };
-    const owned = this.state.inventory.items[itemId] || 0;
+    const def = ITEM_DEFINITIONS[itemId];
+    if (!def || typeof def.sellPrice !== "number")
+      return { ok: false, message: "Item cannot be sold." };
+    if (quantity <= 0) return { ok: false, message: "Invalid quantity." };
+    const owned = this.inventory.items[itemId] || 0;
     if (owned < quantity)
       return { ok: false, message: "Not enough items to sell." };
-    this.state.inventory.items[itemId] = owned - quantity;
-    this.state.inventory.gold += def.sellPrice * quantity;
+    this.inventory.items[itemId] = owned - quantity;
+    this.inventory.gold += def.sellPrice * quantity;
     this.emitChange();
     return { ok: true, message: `Sold ${quantity} × ${def.name}.` };
   }
@@ -1142,7 +1158,7 @@ export class TownStore {
     const relief = opts.stressRelief ?? 25;
     const baseCost = opts.blessing ? 45 : 30;
     const totalCost = baseCost * heroIds.length;
-    if (this.state.inventory.gold < totalCost)
+    if (this.inventory.gold < totalCost)
       return { ok: false, message: "Not enough gold for the Abbey services." };
     heroIds.forEach((id) => {
       const hero = this.state.heroes.find((h) => h.id === id);
@@ -1154,7 +1170,7 @@ export class TownStore {
         hero.statuses.flags.blessed = false;
       }
     });
-    this.state.inventory.gold -= totalCost;
+    this.inventory.gold -= totalCost;
     this.emitChange();
     const msg = opts.blessing
       ? `Blessing bestowed on ${heroIds.length} hero(es).`

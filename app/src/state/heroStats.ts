@@ -171,14 +171,6 @@ export const STATUS_EFFECT_LIBRARY: Record<
     stacking: "stack",
     tags: ["damage", "debuff"],
   },
-  stun: {
-    id: "stun",
-    name: "Stun",
-    baseDuration: 1,
-    maxStacks: 1,
-    stacking: "refresh",
-    tags: ["control"],
-  },
   burn: {
     id: "burn",
     name: "Burn",
@@ -195,30 +187,6 @@ export const STATUS_EFFECT_LIBRARY: Record<
     stacking: "stack",
     tags: ["debuff"],
   },
-  curse: {
-    id: "curse",
-    name: "Curse",
-    baseDuration: 4,
-    maxStacks: 1,
-    stacking: "refresh",
-    tags: ["debuff"],
-  },
-  mark: {
-    id: "mark",
-    name: "Mark",
-    baseDuration: 2,
-    maxStacks: 1,
-    stacking: "refresh",
-    tags: ["debuff", "mark"],
-  },
-  taunt: {
-    id: "taunt",
-    name: "Taunt",
-    baseDuration: 1,
-    maxStacks: 1,
-    stacking: "refresh",
-    tags: ["control"],
-  },
 };
 
 const STATUS_EFFECT_DERIVED_MODIFIERS: Record<
@@ -227,12 +195,8 @@ const STATUS_EFFECT_DERIVED_MODIFIERS: Record<
 > = {
   bleeding: { dodge: -4 },
   poison: { dodge: -2, debuffResist: -5 },
-  stun: { accuracy: -20, initiative: -100 },
   burn: { dodge: -3, accuracy: -3 },
   chill: { dodge: -4, initiative: -8 },
-  curse: { accuracy: -5, critChance: -5 },
-  mark: { dodge: -8 },
-  taunt: { accuracy: 5 },
 };
 
 const TORCH_BANDS = [

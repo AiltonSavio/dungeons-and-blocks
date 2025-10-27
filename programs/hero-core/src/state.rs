@@ -37,8 +37,8 @@ pub struct HeroMint {
     pub status_effects: u8,
     pub skill_1: Skill,
     pub skill_2: Skill,
-    pub positive_quirks: [Option<u8>; 3],
-    pub negative_quirks: [Option<u8>; 3],
+    pub positive_traits: [Option<u8>; 3],
+    pub negative_traits: [Option<u8>; 3],
     pub is_soulbound: bool,
     pub is_burned: bool,
     pub mint_timestamp: i64,
@@ -48,7 +48,11 @@ pub struct HeroMint {
     pub locked_adventure: Pubkey,
     pub locked_program: Pubkey,
     pub locked_since: i64,
-    pub padding: [u8; 31],
+    pub stress: u16,
+    pub stress_max: u16,
+    pub reroll_count: u8,
+    pub blessed: bool,
+    pub padding: [u8; 25],
 }
 
 impl HeroMint {
@@ -73,19 +77,11 @@ impl HeroMint {
         + 32
         + 32
         + 8
-        + 31;
-}
-
-#[account]
-pub struct GoldAccount {
-    pub owner: Pubkey,
-    pub balance: u64,
-    pub bump: u8,
-    pub reserved: [u8; 7],
-}
-
-impl GoldAccount {
-    pub const LEN: usize = 8 + 32 + 8 + 1 + 7;
+        + 2
+        + 2
+        + 1
+        + 1
+        + 25;
 }
 
 #[account]
@@ -121,6 +117,55 @@ pub struct Stats {
     pub resistance: u8,
     pub speed: u8,
     pub luck: u8,
+}
+
+pub fn encode_trait_slot(value: Option<u8>) -> u8 {
+    value.unwrap_or(TRAIT_NONE_VALUE)
+}
+
+pub fn decode_trait_slot(value: u8) -> Option<u8> {
+    if value == TRAIT_NONE_VALUE {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+pub fn encode_trait_slots(values: &[Option<u8>; TRAIT_SLOT_COUNT]) -> [u8; TRAIT_SLOT_COUNT] {
+    let mut result = [TRAIT_NONE_VALUE; TRAIT_SLOT_COUNT];
+    for (idx, value) in values.iter().enumerate() {
+        result[idx] = encode_trait_slot(*value);
+    }
+    result
+}
+
+pub fn decode_trait_slots(values: &[u8; TRAIT_SLOT_COUNT]) -> [Option<u8>; TRAIT_SLOT_COUNT] {
+    let mut result = [None; TRAIT_SLOT_COUNT];
+    for (idx, value) in values.iter().enumerate() {
+        result[idx] = decode_trait_slot(*value);
+    }
+    result
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AdventureHeroStats {
+    pub hero_id: u64,
+    pub hero_type: u8,
+    pub level: u8,
+    pub experience: u64,
+    pub max_hp: u8,
+    pub current_hp: u8,
+    pub attack: u8,
+    pub defense: u8,
+    pub magic: u8,
+    pub resistance: u8,
+    pub speed: u8,
+    pub luck: u8,
+    pub status_effects: u8,
+    pub stress: u16,
+    pub stress_max: u16,
+    pub positive_traits: [u8; TRAIT_SLOT_COUNT],
+    pub negative_traits: [u8; TRAIT_SLOT_COUNT],
 }
 
 #[repr(u8)]
@@ -207,4 +252,13 @@ pub struct HeroUnlockedEvent {
     pub player: Pubkey,
     pub hero_id: u64,
     pub adventure: Pubkey,
+}
+
+#[event]
+pub struct HeroHealed {
+    pub player: Pubkey,
+    pub hero_id: u64,
+    pub amount: u8,
+    pub gold_spent: u64,
+    pub resulting_hp: u8,
 }

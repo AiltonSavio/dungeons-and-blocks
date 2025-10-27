@@ -24,6 +24,7 @@ export const TOPBAR_HEIGHT = 64;
 export const GOLD_PANEL_WIDTH = 180;
 export const WALLET_PANEL_WIDTH = 220;
 export const WALLET_PANEL_HEIGHT = 34;
+export const AIRDROP_BUTTON_WIDTH = 150;
 export const TOPBAR_RIGHT_PADDING = 16;
 export const TOPBAR_GAP = 16;
 
@@ -31,7 +32,7 @@ export const BUILDINGS: BuildingDef[] = [
   {
     key: "tavern",
     label: "Tavern",
-    caption: "Recruit & rest heroes",
+    caption: "Recruit & heal heroes",
     col: 0,
     row: 0,
   },

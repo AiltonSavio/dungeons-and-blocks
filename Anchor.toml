@@ -8,18 +8,20 @@ skip-lint = false
 adventure_engine = "9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt"
 hero_core = "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
 dungeon_nft = "3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw"
+player_economy = "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
 
 [programs.localnet]
 adventure-engine = "9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt"
 hero-core = "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
 dungeon-nft = "3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw"
+player-economy = "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
 cluster = "devnet"
-wallet = "~/.config/solana/id.json"
+wallet = "~/.config/solana/phantom.json"
 
 [workspace]
 members = ["programs/*"]
@@ -28,6 +30,7 @@ members = ["programs/*"]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 init-dungeon-config = "node scripts/init-dungeon-config.js"
 seeded-mint = "node scripts/seeded-mint.js"
+hero-dev = "node scripts/hero-dev.js"
 
 [test]
 startup_wait = 5000

@@ -1,8 +1,13 @@
 use anchor_lang::prelude::*;
 
-use crate::constants::{adventure_engine_program_id, HERO_SEED};
+use crate::constants::{
+    adventure_engine_program_id, HERO_SEED, MAX_STAT_VALUE, MAX_STRESS_MAX, MIN_STRESS_MAX,
+    STATUS_EFFECTS_COUNT,
+};
 use crate::errors::HeroError;
-use crate::state::{HeroLockedEvent, HeroMint, HeroUnlockedEvent};
+use crate::state::{
+    decode_trait_slots, AdventureHeroStats, HeroLockedEvent, HeroMint, HeroUnlockedEvent,
+};
 
 pub fn lock_for_adventure(ctx: Context<LockCtx>, adventure_pda: Pubkey) -> Result<()> {
     let hero = &mut ctx.accounts.hero_mint;
@@ -68,10 +73,9 @@ pub fn unlock_from_adventure(ctx: Context<UnlockCtx>, adventure_pda: Pubkey) -> 
     Ok(())
 }
 
-pub fn update_hp_from_adventure(
+pub fn sync_stats_from_adventure(
     ctx: Context<AdventureWrite>,
-    hero_id: u64,
-    new_hp: u8,
+    hero_state: AdventureHeroStats,
 ) -> Result<()> {
     let hero = &mut ctx.accounts.hero_mint;
 
@@ -86,37 +90,40 @@ pub fn update_hp_from_adventure(
         adventure_engine_program_id(),
         HeroError::WrongProgram
     );
-    require_eq!(hero.id, hero_id, HeroError::HeroMismatch);
-
-    hero.current_hp = new_hp.min(hero.max_hp);
-
-    Ok(())
-}
-
-pub fn update_xp_from_adventure(
-    ctx: Context<AdventureWrite>,
-    hero_id: u64,
-    xp_delta: u64,
-) -> Result<()> {
-    let hero = &mut ctx.accounts.hero_mint;
-
-    require!(hero.locked, HeroError::NotLocked);
-    require_keys_eq!(
-        hero.locked_adventure,
-        ctx.accounts.adventure_signer.key(),
-        HeroError::WrongAdventure
+    require_eq!(hero.id, hero_state.hero_id, HeroError::HeroMismatch);
+    require_eq!(
+        hero.hero_type,
+        hero_state.hero_type,
+        HeroError::HeroMismatch
     );
-    require_keys_eq!(
-        hero.locked_program,
-        adventure_engine_program_id(),
-        HeroError::WrongProgram
-    );
-    require_eq!(hero.id, hero_id, HeroError::HeroMismatch);
 
-    hero.experience = hero
-        .experience
-        .checked_add(xp_delta)
-        .ok_or(HeroError::MathOverflow)?;
+    hero.level = hero_state.level;
+    hero.experience = hero_state.experience;
+    hero.max_hp = hero_state.max_hp.min(MAX_STAT_VALUE);
+    hero.current_hp = hero_state.current_hp.min(hero.max_hp);
+    hero.attack = hero_state.attack.min(MAX_STAT_VALUE);
+    hero.defense = hero_state.defense.min(MAX_STAT_VALUE);
+    hero.magic = hero_state.magic.min(MAX_STAT_VALUE);
+    hero.resistance = hero_state.resistance.min(MAX_STAT_VALUE);
+    hero.speed = hero_state.speed.min(MAX_STAT_VALUE);
+    hero.luck = hero_state.luck.min(MAX_STAT_VALUE);
+
+    let status_mask = if STATUS_EFFECTS_COUNT >= 8 {
+        u8::MAX
+    } else {
+        (1u8 << STATUS_EFFECTS_COUNT) - 1
+    };
+    hero.status_effects = hero_state.status_effects & status_mask;
+
+    let stress_cap = hero_state
+        .stress_max
+        .max(MIN_STRESS_MAX)
+        .min(MAX_STRESS_MAX);
+    hero.stress_max = stress_cap;
+    hero.stress = hero_state.stress.min(stress_cap);
+
+    hero.positive_traits = decode_trait_slots(&hero_state.positive_traits);
+    hero.negative_traits = decode_trait_slots(&hero_state.negative_traits);
 
     Ok(())
 }

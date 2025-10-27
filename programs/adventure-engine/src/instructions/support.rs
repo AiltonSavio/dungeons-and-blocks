@@ -1,12 +1,14 @@
 use anchor_lang::prelude::*;
-use hero_core::{cpi, cpi::accounts as hero_accounts, state::HeroMint};
+use hero_core::constants::{BASE_STRESS_MAX, MAX_STRESS_MAX, MIN_STRESS_MAX, STATUS_EFFECTS_COUNT};
+use hero_core::state::{encode_trait_slots, HeroMint};
 
 use crate::errors::AdventureError;
-use crate::state::HeroAdventureLock;
+use crate::state::{HeroAdventureLock, HeroSnapshot};
 
 pub struct HeroSummary {
     pub owner: Pubkey,
     pub is_burned: bool,
+    pub snapshot: HeroSnapshot,
 }
 
 pub fn read_hero_summary(account_info: &AccountInfo<'_>) -> Result<HeroSummary> {
@@ -17,9 +19,42 @@ pub fn read_hero_summary(account_info: &AccountInfo<'_>) -> Result<HeroSummary> 
     let mut cursor: &[u8] = &data[..];
     let hero = HeroMint::try_deserialize(&mut cursor)
         .map_err(|_| error!(AdventureError::InvalidHeroLockAccount))?;
+    let current_hp = hero.current_hp.min(hero.max_hp);
+    let status_mask = if STATUS_EFFECTS_COUNT >= 8 {
+        u8::MAX
+    } else {
+        (1u8 << STATUS_EFFECTS_COUNT) - 1
+    };
+    let mut stress_max = hero.stress_max;
+    if stress_max == 0 {
+        stress_max = BASE_STRESS_MAX;
+    }
+    stress_max = stress_max.max(MIN_STRESS_MAX).min(MAX_STRESS_MAX);
+    let stress = hero.stress.min(stress_max);
+    let positive_traits = encode_trait_slots(&hero.positive_traits);
+    let negative_traits = encode_trait_slots(&hero.negative_traits);
     Ok(HeroSummary {
         owner: hero.owner,
         is_burned: hero.is_burned,
+        snapshot: HeroSnapshot {
+            hero_id: hero.id,
+            hero_type: hero.hero_type,
+            level: hero.level,
+            experience: hero.experience,
+            max_hp: hero.max_hp,
+            current_hp,
+            attack: hero.attack,
+            defense: hero.defense,
+            magic: hero.magic,
+            resistance: hero.resistance,
+            speed: hero.speed,
+            luck: hero.luck,
+            status_effects: hero.status_effects & status_mask,
+            stress,
+            stress_max,
+            positive_traits,
+            negative_traits,
+        },
     })
 }
 
@@ -63,80 +98,4 @@ pub fn store_hero_lock(account_info: &AccountInfo<'_>, value: &HeroAdventureLock
         }
     }
     Ok(())
-}
-
-pub fn lock_hero_for_adventure<'info>(
-    hero_core_program: &AccountInfo<'info>,
-    player: &AccountInfo<'info>,
-    hero_mint: &AccountInfo<'info>,
-    adventure: &AccountInfo<'info>,
-    adventure_key: &Pubkey,
-    signer_seeds: &[&[u8]],
-) -> Result<()> {
-    let accounts = hero_accounts::LockCtx {
-        player: player.clone(),
-        hero_mint: hero_mint.clone(),
-        adventure_signer: adventure.clone(),
-    };
-    cpi::lock_for_adventure(
-        CpiContext::new_with_signer(hero_core_program.clone(), accounts, &[signer_seeds]),
-        *adventure_key,
-    )
-}
-
-pub fn unlock_hero_from_adventure<'info>(
-    hero_core_program: &AccountInfo<'info>,
-    player: &AccountInfo<'info>,
-    hero_mint: &AccountInfo<'info>,
-    adventure: &AccountInfo<'info>,
-    adventure_key: &Pubkey,
-    signer_seeds: &[&[u8]],
-) -> Result<()> {
-    let accounts = hero_accounts::UnlockCtx {
-        player: player.clone(),
-        hero_mint: hero_mint.clone(),
-        adventure_signer: adventure.clone(),
-    };
-    cpi::unlock_from_adventure(
-        CpiContext::new_with_signer(hero_core_program.clone(), accounts, &[signer_seeds]),
-        *adventure_key,
-    )
-}
-
-pub fn update_hero_hp<'info>(
-    hero_core_program: &AccountInfo<'info>,
-    adventure: &AccountInfo<'info>,
-    hero_mint: &AccountInfo<'info>,
-    hero_id: u64,
-    new_hp: u8,
-    signer_seeds: &[&[u8]],
-) -> Result<()> {
-    let accounts = hero_accounts::AdventureWrite {
-        adventure_signer: adventure.clone(),
-        hero_mint: hero_mint.clone(),
-    };
-    cpi::update_hp_from_adventure(
-        CpiContext::new_with_signer(hero_core_program.clone(), accounts, &[signer_seeds]),
-        hero_id,
-        new_hp,
-    )
-}
-
-pub fn update_hero_xp<'info>(
-    hero_core_program: &AccountInfo<'info>,
-    adventure: &AccountInfo<'info>,
-    hero_mint: &AccountInfo<'info>,
-    hero_id: u64,
-    xp_delta: u64,
-    signer_seeds: &[&[u8]],
-) -> Result<()> {
-    let accounts = hero_accounts::AdventureWrite {
-        adventure_signer: adventure.clone(),
-        hero_mint: hero_mint.clone(),
-    };
-    cpi::update_xp_from_adventure(
-        CpiContext::new_with_signer(hero_core_program.clone(), accounts, &[signer_seeds]),
-        hero_id,
-        xp_delta,
-    )
 }

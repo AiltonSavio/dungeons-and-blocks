@@ -44,4 +44,24 @@ pub enum HeroError {
     AlreadyLocked,
     #[msg("Seeded mint authority mismatch")]
     UnauthorizedAuthority,
+    #[msg("No status effects to cure")]
+    NoStatusEffects,
+    #[msg("No negative traits to cure")]
+    NoNegativeTraits,
+    #[msg("Hero has reached maximum reroll limit")]
+    MaxRerollsReached,
+    #[msg("Hero stress is already at zero")]
+    NoStressToRelieve,
+    #[msg("Hero is already blessed")]
+    AlreadyBlessed,
+    #[msg("Invalid negative trait")]
+    InvalidNegativeTrait,
+    #[msg("All negative trait slots are filled")]
+    NegativeTraitSlotsFull,
+    #[msg("Hero is already at maximum HP")]
+    HeroAtMaxHp,
+    #[msg("Invalid heal amount")]
+    InvalidHealAmount,
+    #[msg("Heal amount exceeds missing HP")]
+    HealAmountTooLarge,
 }

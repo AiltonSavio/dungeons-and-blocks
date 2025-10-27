@@ -1,5 +1,10 @@
 [workspace]
-members = ["programs/*"]
+members = [
+    "programs/hero-core",
+    "programs/dungeon-nft",
+    "programs/adventure-engine",
+    # "programs/player-economy"
+]
 resolver = "2"
 
 [profile.release]

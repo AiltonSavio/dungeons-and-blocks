@@ -1,3 +1,8 @@
+import { ITEM_DEFINITIONS } from "./items";
+import type { ItemDefinition, ItemId } from "./items";
+
+export type { ItemDefinition, ItemId } from "./items";
+
 export type HeroClass =
   | "Archer"
   | "Armored Axeman"
@@ -74,15 +79,7 @@ export type HeroSkill = {
   classRestriction: HeroClass;
 };
 
-export type StatusEffectId =
-  | "bleeding"
-  | "poison"
-  | "stun"
-  | "burn"
-  | "chill"
-  | "curse"
-  | "mark"
-  | "taunt";
+export type StatusEffectId = "bleeding" | "poison" | "burn" | "chill";
 
 export type StatusStackingRule = "refresh" | "stack" | "extend";
 
@@ -137,22 +134,6 @@ export type Hero = {
   elemental: ElementalProfile;
 };
 
-export type ItemId =
-  | "torch"
-  | "potion"
-  | "bandage"
-  | "antidote"
-  | "elixir"
-  | "food";
-
-export type ItemDefinition = {
-  id: ItemId;
-  name: string;
-  description: string;
-  buyPrice: number;
-  sellPrice: number;
-};
-
 export type Inventory = {
   gold: number;
   items: Record<ItemId, number>;
@@ -173,55 +154,14 @@ export type CommunityDungeon = CustomDungeon & {
 
 export type TownState = {
   heroes: Hero[];
-  inventory: Inventory;
   customDungeons: CustomDungeon[];
   lastCommunityUpdate: number;
-  suppliesReserve: Record<ItemId, number>;
 };
 
 export const MARKET_ITEMS: ItemDefinition[] = [
-  {
-    id: "torch",
-    name: "Torch Bundle",
-    description: "Keeps the darkness at bay.",
-    buyPrice: 20,
-    sellPrice: 8,
-  },
-  {
-    id: "potion",
-    name: "Healing Potion",
-    description: "Restores a modest amount of vitality.",
-    buyPrice: 30,
-    sellPrice: 12,
-  },
-  {
-    id: "bandage",
-    name: "Sterile Bandage",
-    description: "Stops bleeding and minor wounds.",
-    buyPrice: 18,
-    sellPrice: 7,
-  },
-  {
-    id: "antidote",
-    name: "Antidote",
-    description: "Removes common poisons.",
-    buyPrice: 24,
-    sellPrice: 10,
-  },
-  {
-    id: "elixir",
-    name: "Arcane Elixir",
-    description: "Boosts magical aptitude temporarily.",
-    buyPrice: 45,
-    sellPrice: 16,
-  },
-  {
-    id: "food",
-    name: "Provision Crate",
-    description: "Useful for camping and morale.",
-    buyPrice: 15,
-    sellPrice: 6,
-  },
+  { ...ITEM_DEFINITIONS.stress_tonic },
+  { ...ITEM_DEFINITIONS.minor_torch },
+  { ...ITEM_DEFINITIONS.healing_salve },
 ];
 
 export const HERO_CLASS_PALETTE: Record<HeroClass, number> = {

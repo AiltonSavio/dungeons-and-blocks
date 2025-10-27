@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::state::{DungeonPoint, DungeonRoom};
+use crate::state::{DungeonPoint, DungeonRoom, HeroSnapshot};
 
 pub struct GeneratedAdventure {
     pub grid: Vec<u8>,
@@ -238,4 +238,38 @@ fn ensure_floor_tiles(chests: &mut [DungeonPoint], rooms: &[DungeonRoom]) {
             *chest = rooms[0].center();
         }
     }
+}
+
+/// Calculate stat buffs based on torch level
+/// - Torch > 66: No buff (returns 0)
+/// - Torch <= 66: First tier buff (returns 2 points per stat)
+/// - Torch <= 33: Second tier buff (returns 5 points per stat)
+pub fn get_torch_stat_buff(torch: u8) -> u8 {
+    if torch <= 33 {
+        5
+    } else if torch <= 66 {
+        2
+    } else {
+        0
+    }
+}
+
+/// Apply torch-based stat buffs to a hero snapshot
+/// Returns a modified copy of the hero with buffed stats
+pub fn apply_torch_buffs(hero: &HeroSnapshot, torch: u8) -> HeroSnapshot {
+    let buff = get_torch_stat_buff(torch);
+
+    if buff == 0 {
+        return *hero;
+    }
+
+    let mut buffed = *hero;
+    buffed.attack = buffed.attack.saturating_add(buff);
+    buffed.defense = buffed.defense.saturating_add(buff);
+    buffed.magic = buffed.magic.saturating_add(buff);
+    buffed.resistance = buffed.resistance.saturating_add(buff);
+    buffed.speed = buffed.speed.saturating_add(buff);
+    buffed.luck = buffed.luck.saturating_add(buff);
+
+    buffed
 }

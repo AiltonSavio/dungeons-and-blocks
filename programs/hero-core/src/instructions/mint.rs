@@ -4,16 +4,17 @@ use ephemeral_vrf_sdk::consts::{DEFAULT_QUEUE, VRF_PROGRAM_IDENTITY};
 use ephemeral_vrf_sdk::instructions::{create_request_randomness_ix, RequestRandomnessParams};
 
 use crate::constants::{
-    seeded_mint_authority, GAME_VAULT_SEED, GOLD_ACCOUNT_SEED, HERO_PRICE, HERO_SEED,
-    MAX_FREE_HEROES, MAX_HEROES_PER_PLAYER, PLAYER_PROFILE_SEED,
+    seeded_mint_authority, GAME_VAULT_SEED, HERO_PRICE, HERO_SEED, MAX_FREE_HEROES,
+    MAX_HEROES_PER_PLAYER, PLAYER_PROFILE_SEED,
 };
 use crate::errors::HeroError;
 use crate::helpers::{derive_caller_seed, meta};
 use crate::logic::{fill_hero_from_randomness, register_soulbound};
 use crate::state::{
-    GameVault, GoldAccount, HeroMint, HeroMinted, PendingRequestType, PlayerProfile,
-    RandomnessRequested, RequestType,
+    GameVault, HeroMint, HeroMinted, PendingRequestType, PlayerProfile, RandomnessRequested,
+    RequestType,
 };
+use player_economy::{self, PLAYER_ECONOMY_SEED};
 
 pub fn mint_hero_free(ctx: Context<MintHeroFree>) -> Result<()> {
     let profile = &mut ctx.accounts.player_profile;
@@ -41,7 +42,7 @@ pub fn mint_hero_free(ctx: Context<MintHeroFree>) -> Result<()> {
     hero.is_soulbound = true;
     hero.mint_timestamp = Clock::get()?.unix_timestamp;
     hero.last_level_up = hero.mint_timestamp;
-    hero.padding = [0; 31];
+    hero.padding = [0; 25];
 
     profile.next_hero_id = profile
         .next_hero_id
@@ -123,18 +124,10 @@ pub fn callback_mint_hero_free(
 pub fn mint_hero_paid(ctx: Context<MintHeroPaid>) -> Result<()> {
     let profile = &mut ctx.accounts.player_profile;
     let hero = &mut ctx.accounts.hero_mint;
-    let gold_account = &mut ctx.accounts.gold_account;
     let vault = &mut ctx.accounts.game_vault;
     let payer_key = ctx.accounts.payer.key();
 
     require_keys_eq!(profile.owner, payer_key, HeroError::UnauthorizedOwner);
-
-    if gold_account.owner == Pubkey::default() {
-        gold_account.owner = payer_key;
-        gold_account.bump = ctx.bumps.gold_account;
-        gold_account.balance = 0;
-        gold_account.reserved = [0; 7];
-    }
 
     if vault.bump == 0 {
         vault.bump = ctx.bumps.game_vault;
@@ -145,15 +138,15 @@ pub fn mint_hero_paid(ctx: Context<MintHeroPaid>) -> Result<()> {
         profile.hero_count < MAX_HEROES_PER_PLAYER,
         HeroError::HeroCapacityReached
     );
-    require!(
-        gold_account.balance >= HERO_PRICE,
-        HeroError::InsufficientGold
-    );
 
-    gold_account.balance = gold_account
-        .balance
-        .checked_sub(HERO_PRICE)
-        .ok_or(HeroError::MathOverflow)?;
+    let spend_ctx = CpiContext::new(
+        ctx.accounts.player_economy_program.to_account_info(),
+        player_economy::cpi::accounts::SpendGold {
+            owner: ctx.accounts.payer.to_account_info(),
+            player_economy: ctx.accounts.player_economy_account.to_account_info(),
+        },
+    );
+    player_economy::cpi::spend_gold(spend_ctx, HERO_PRICE)?;
 
     vault.balance = vault
         .balance
@@ -169,7 +162,7 @@ pub fn mint_hero_paid(ctx: Context<MintHeroPaid>) -> Result<()> {
     hero.is_soulbound = false;
     hero.mint_timestamp = Clock::get()?.unix_timestamp;
     hero.last_level_up = hero.mint_timestamp;
-    hero.padding = [0; 31];
+    hero.padding = [0; 25];
 
     profile.next_hero_id = profile
         .next_hero_id
@@ -289,7 +282,7 @@ pub fn mint_hero_with_seed(
     hero.locked_adventure = Pubkey::default();
     hero.locked_program = Pubkey::default();
     hero.locked_since = 0;
-    hero.padding = [0; 31];
+    hero.padding = [0; 25];
 
     fill_hero_from_randomness(hero, seed)?;
     hero.is_soulbound = is_soulbound;
@@ -421,19 +414,19 @@ pub struct MintHeroPaid<'info> {
     #[account(
         init_if_needed,
         payer = payer,
-        space = GoldAccount::LEN,
-        seeds = [GOLD_ACCOUNT_SEED, payer.key().as_ref()],
-        bump
-    )]
-    pub gold_account: Account<'info, GoldAccount>,
-    #[account(
-        init_if_needed,
-        payer = payer,
         space = GameVault::LEN,
         seeds = [GAME_VAULT_SEED],
         bump
     )]
     pub game_vault: Account<'info, GameVault>,
+    #[account(
+        mut,
+        seeds = [PLAYER_ECONOMY_SEED, payer.key().as_ref()],
+        bump = player_economy_account.bump,
+        seeds::program = player_economy::ID
+    )]
+    pub player_economy_account: Account<'info, player_economy::PlayerEconomy>,
+    pub player_economy_program: Program<'info, player_economy::program::PlayerEconomy>,
     /// CHECK: VRF oracle queue; queue authority enforced off-chain and via VRF program.
     #[account(mut, address = DEFAULT_QUEUE)]
     pub oracle_queue: AccountInfo<'info>,

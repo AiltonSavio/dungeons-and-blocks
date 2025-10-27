@@ -3,7 +3,7 @@ use ephemeral_vrf_sdk::anchor::vrf;
 use ephemeral_vrf_sdk::consts::{DEFAULT_QUEUE, VRF_PROGRAM_IDENTITY};
 use ephemeral_vrf_sdk::instructions::{create_request_randomness_ix, RequestRandomnessParams};
 
-use crate::constants::{HERO_SEED, MAX_LEVEL};
+use crate::constants::{HERO_SEED, LEVEL_UP_GOLD_COST, MAX_LEVEL};
 use crate::errors::HeroError;
 use crate::helpers::{derive_caller_seed, meta};
 use crate::logic::{apply_level_up, validate_level_up_requirements};
@@ -23,6 +23,15 @@ pub fn level_up_hero(ctx: Context<LevelUpHero>, hero_id: u64) -> Result<()> {
         hero.pending_request == PendingRequestType::None as u8,
         HeroError::HeroBusy
     );
+
+    // Spend gold via CPI to player-economy program
+    let cpi_program = ctx.accounts.player_economy_program.to_account_info();
+    let cpi_accounts = player_economy::cpi::accounts::SpendGold {
+        owner: ctx.accounts.payer.to_account_info(),
+        player_economy: ctx.accounts.player_economy.to_account_info(),
+    };
+    let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+    player_economy::cpi::spend_gold(cpi_ctx, LEVEL_UP_GOLD_COST)?;
 
     hero.pending_request = PendingRequestType::LevelUp as u8;
 
@@ -100,6 +109,10 @@ pub struct LevelUpHero<'info> {
         constraint = hero_mint.owner == payer.key() @ HeroError::UnauthorizedOwner
     )]
     pub hero_mint: Account<'info, HeroMint>,
+    /// CHECK: player_economy PDA verified by player-economy program
+    #[account(mut)]
+    pub player_economy: AccountInfo<'info>,
+    pub player_economy_program: Program<'info, player_economy::program::PlayerEconomy>,
     /// CHECK: VRF oracle queue; queue authority enforced off-chain and via VRF program.
     #[account(mut, address = DEFAULT_QUEUE)]
     pub oracle_queue: AccountInfo<'info>,

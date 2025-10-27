@@ -21,10 +21,10 @@ pub fn delegate_adventure(ctx: Context<DelegateAdventure>) -> Result<()> {
 
     let mut config = DelegateConfig::default();
     config.commit_frequency_ms = DEFAULT_COMMIT_FREQUENCY_MS;
-    config.validator = Some(us_devnet_validator_pubkey()?);
+    if let Some(validator) = ctx.remaining_accounts.first() {
+        config.validator = Some(validator.key());
+    }
 
-    // This marks the PDA read-only from the perspective of this program
-    // for the remainder of the instruction. We therefore do not mutate anything here.
     ctx.accounts
         .delegate_pda(&ctx.accounts.payer, seeds, config)?;
 

@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::keccak::hashv;
 
-use crate::constants::{EXPERIENCE_THRESHOLDS, MAX_LEVEL, MAX_STAT_VALUE};
+use crate::constants::{
+    BASE_STRESS_MAX, EXPERIENCE_THRESHOLDS, MAX_LEVEL, MAX_STAT_VALUE, MAX_STRESS_MAX,
+    MIN_STRESS_MAX, TRAIT_SLOT_COUNT,
+};
 use crate::errors::HeroError;
 use crate::state::{HeroMint, PlayerProfile, Skill, Stats};
 
@@ -14,21 +17,25 @@ pub fn fill_hero_from_randomness(hero: &mut HeroMint, randomness: [u8; 32]) -> R
     hero.status_effects = 0;
 
     let stats = roll_stats(hero.level, &mut rng)?;
-    hero.max_hp = stats.max_hp;
-    hero.current_hp = stats.max_hp;
+
+    hero.max_hp = stats.max_hp.max(1);
+    hero.current_hp = hero.max_hp;
     hero.attack = stats.attack;
     hero.defense = stats.defense;
     hero.magic = stats.magic;
     hero.resistance = stats.resistance;
     hero.speed = stats.speed;
     hero.luck = stats.luck;
+    hero.positive_traits = [None; TRAIT_SLOT_COUNT];
+    hero.negative_traits = [None; TRAIT_SLOT_COUNT];
+    hero.stress_max = BASE_STRESS_MAX;
+    hero.stress = 0;
+    hero.reroll_count = 0;
+    hero.blessed = false;
 
     let (skill_a, skill_b) = hero_skills(hero.hero_type);
     hero.skill_1 = skill_a;
     hero.skill_2 = skill_b;
-
-    hero.positive_quirks = Default::default();
-    hero.negative_quirks = Default::default();
 
     hero.mint_timestamp = Clock::get()?.unix_timestamp;
     hero.last_level_up = hero.mint_timestamp;
@@ -48,6 +55,15 @@ pub fn apply_level_up(hero: &mut HeroMint, randomness: [u8; 32]) -> Result<()> {
     hero.resistance = grow_stat(hero.resistance, level_bonus, &mut rng);
     hero.speed = grow_stat(hero.speed, level_bonus, &mut rng);
     hero.luck = grow_stat(hero.luck, level_bonus, &mut rng);
+    if hero.stress_max < MIN_STRESS_MAX {
+        hero.stress_max = MIN_STRESS_MAX;
+    }
+    if hero.stress_max > MAX_STRESS_MAX {
+        hero.stress_max = MAX_STRESS_MAX;
+    }
+    if hero.stress > hero.stress_max {
+        hero.stress = hero.stress_max;
+    }
 
     Ok(())
 }
@@ -190,4 +206,14 @@ pub fn validate_level_up_requirements(hero: &crate::state::HeroMint) -> Result<u
     );
 
     Ok(target_level)
+}
+
+pub fn roll_stats_for_level(level: u8, seed: [u8; 32]) -> Result<Stats> {
+    let mut rng = RandomStream {
+        seed,
+        counter: 0,
+        buffer: [0u8; 32],
+        offset: 32,
+    };
+    roll_stats(level, &mut rng)
 }

@@ -1,18 +1,15 @@
 [package]
-name = "hero-core"
+name = "player-economy"
 version = "0.1.0"
-description = "Created with Anchor"
+description = "Shared gold and item economy program"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "hero_core"
+name = "player_economy"
 
 [dependencies]
 anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
-ephemeral-rollups-sdk = { version = "0.2.4", features = ["anchor"] }
-ephemeral-vrf-sdk = { version = "0.1.2", features = ["anchor"] }
-player-economy = { path = "../player-economy", features = ["no-entrypoint", "cpi"] }
 
 [features]
 default = []

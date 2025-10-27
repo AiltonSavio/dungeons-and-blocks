@@ -13,6 +13,7 @@ import {
   TOPBAR_GAP,
   TOPBAR_HEIGHT,
   TOPBAR_RIGHT_PADDING,
+  AIRDROP_BUTTON_WIDTH,
   WALLET_PANEL_HEIGHT,
   WALLET_PANEL_WIDTH,
 } from "../constants";
@@ -42,6 +43,7 @@ type TopBarOptions = {
 type TopBarResult = {
   panel: Phaser.GameObjects.Container;
   walletPanel: Phaser.GameObjects.Container;
+  grantPanel: Phaser.GameObjects.Container;
   goldPanel: Phaser.GameObjects.Container;
 };
 
@@ -215,17 +217,28 @@ export function createTopBar({
       TOPBAR_RIGHT_PADDING -
       GOLD_PANEL_WIDTH -
       TOPBAR_GAP -
+      AIRDROP_BUTTON_WIDTH -
+      TOPBAR_GAP -
       WALLET_PANEL_WIDTH
   );
   const walletY = Math.round((TOPBAR_HEIGHT - WALLET_PANEL_HEIGHT) / 2);
   const walletPanel = scene.add.container(walletX, walletY);
   panel.add(walletPanel);
 
+  const grantX =
+    bg.width -
+    TOPBAR_RIGHT_PADDING -
+    GOLD_PANEL_WIDTH -
+    TOPBAR_GAP -
+    AIRDROP_BUTTON_WIDTH;
+  const grantPanel = scene.add.container(grantX, walletY);
+  panel.add(grantPanel);
+
   const goldY = Math.round((TOPBAR_HEIGHT - 24) / 2);
   const goldPanel = scene.add.container(bg.width - TOPBAR_RIGHT_PADDING, goldY);
   panel.add(goldPanel);
 
-  return { panel, walletPanel, goldPanel };
+  return { panel, walletPanel, grantPanel, goldPanel };
 }
 
 export function renderEmbarkCTA({

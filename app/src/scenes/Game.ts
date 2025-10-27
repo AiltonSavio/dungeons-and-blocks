@@ -17,13 +17,17 @@ import { MinimapController } from "./game/minimap";
 import { ChainDungeon, fetchDungeonByAddress } from "../state/dungeonChain";
 import {
   ChainAdventure,
+  ChainHeroSnapshot,
   createMoveHeroInstruction,
   directionFromDelta,
   fetchAdventureSessionSmart,
   deriveAdventurePda,
   getAdventureProgram,
+  mapAdventureAccount,
+  TRAIT_NONE,
   type AdventureDirection,
 } from "../state/adventureChain";
+import { findTrait } from "../state/traitCatalog";
 import { deriveTempKeypair, isTempKeypairFunded } from "../state/tempKeypair";
 import type { HeroClass } from "../state/models";
 
@@ -94,6 +98,8 @@ type GameConfig = {
   gridH: number;
 };
 
+const STATUS_EFFECT_NAMES = ["Bleeding", "Poison", "Burn", "Chill"];
+
 // ==================== GAME SCENE ====================
 
 export default class Game extends Phaser.Scene {
@@ -138,6 +144,13 @@ export default class Game extends Phaser.Scene {
   private chests: Chest[] = [];
   private portals: Portal[] = [];
 
+  // Portal modal
+  private portalModalOverlay?: Phaser.GameObjects.Rectangle;
+  private portalModalPanel?: Phaser.GameObjects.Container;
+  private currentPortalForExit?: Portal;
+  private isExitingDungeon = false;
+  private lastPortalTileShown?: { x: number; y: number }; // Track which portal we've shown
+
   // Layers
   private worldLayer!: Phaser.GameObjects.Layer;
   private uiLayer!: Phaser.GameObjects.Layer;
@@ -155,6 +168,7 @@ export default class Game extends Phaser.Scene {
   private playerPublicKey?: PublicKey;
   private tempKeypair?: Keypair;
   private adventureSubscriptionId?: number;
+  private heroHudTexts: Phaser.GameObjects.Text[] = [];
 
   // Movement tracking
   private lastConfirmedTile?: { x: number; y: number }; // Last on-chain confirmed position
@@ -294,6 +308,8 @@ export default class Game extends Phaser.Scene {
     this.lastConfirmedTile = undefined;
     this.optimisticTile = undefined;
     this.isNearInteractable = false;
+    this.lastPortalTileShown = undefined;
+    this.isExitingDungeon = false;
 
     // Initialize temp keypair
     if (this.playerPublicKey) {
@@ -340,7 +356,7 @@ export default class Game extends Phaser.Scene {
     this.radius = (this.tileSize - 4) * 0.5;
     this.pxSpeed = this.speed * this.tileSize;
 
-    const adventureStart = this.adventureSession?.heroPositions?.[0];
+    const adventureStart = this.adventureSession?.partyPosition;
     const hasAdventureStart =
       adventureStart &&
       Number.isFinite(adventureStart.x) &&
@@ -400,7 +416,11 @@ export default class Game extends Phaser.Scene {
       D: Phaser.Input.Keyboard.KeyCodes.D,
     }) as unknown as Game["wasd"];
 
-    // Minimap
+    // Minimap with dungeon-specific storage key
+    const dungeonKey =
+      this.onChainDungeon?.publicKey ??
+      this.dungeonSeed.toString() ??
+      "default";
     this.minimap = new MinimapController({
       scene: this,
       grid: this.grid,
@@ -408,6 +428,7 @@ export default class Game extends Phaser.Scene {
       gridHeight: this.gh,
       tileSize: this.tileSize,
       uiLayer: this.uiLayer,
+      storageKey: `minimap_${dungeonKey}`,
     });
     this.minimap.updateLeaderWorld(leader.x, leader.y);
     this.minimap.redraw();
@@ -425,10 +446,12 @@ export default class Game extends Phaser.Scene {
       this.updateCameraZoom();
       this.uiCam.setSize(this.scale.width, this.scale.height);
       this.minimap.handleResize(this.scale.width, this.scale.height);
+      this.rebuildHeroHud();
     });
 
     // Mark scene as ready
     this.sceneReady = true;
+    this.rebuildHeroHud();
   }
 
   update(_time: number, deltaMs: number): void {
@@ -443,9 +466,12 @@ export default class Game extends Phaser.Scene {
     // Check if near interactable
     this.checkNearInteractable();
 
-    // Block movement if near interactable and queue is not empty
+    // Block movement if:
+    // 1. Near interactable and queue is not empty
+    // 2. Portal modal is open
     const blockMovement =
-      this.isNearInteractable && this.movementQueue.length > 0;
+      (this.isNearInteractable && this.movementQueue.length > 0) ||
+      !!this.portalModalOverlay;
 
     // Input direction
     const dir = new Phaser.Math.Vector2(
@@ -511,6 +537,7 @@ export default class Game extends Phaser.Scene {
     // Check chest proximity (but don't open if queue is processing)
     if (this.movementQueue.length === 0) {
       this.checkChestProximity();
+      this.checkPortalProximity();
     }
   }
 
@@ -604,7 +631,6 @@ export default class Game extends Phaser.Scene {
         owner: this.playerPublicKey,
         authority: this.tempKeypair.publicKey,
         adventurePda: this.adventurePda,
-        heroIndex: 0,
         direction: move.direction,
       });
 
@@ -894,7 +920,463 @@ export default class Game extends Phaser.Scene {
     chest.opened = true;
     chest.sprite.setTexture("loot_chest_02");
     this.time.delayedCall(200, () => chest.sprite.setTexture("loot_chest_03"));
+
+    // Mark on minimap
+    this.minimap.markChestOpened(chest.tileX, chest.tileY);
+
     console.log(`[Game] Opened chest at (${chest.tileX}, ${chest.tileY})`);
+  }
+
+  private checkPortalProximity() {
+    // Don't check if modal is already open or currently exiting
+    if (this.portalModalOverlay || this.isExitingDungeon) return;
+
+    if (this.movementQueue.length > 0) return; // Wait for queue to finish
+
+    const leader = this.party[0];
+
+    // Check which tile the leader is on
+    const leaderTileX = Math.floor(leader.x / this.tileSize);
+    const leaderTileY = Math.floor(leader.y / this.tileSize);
+
+    // Check if player moved away from last shown portal
+    if (this.lastPortalTileShown) {
+      const movedAway =
+        leaderTileX !== this.lastPortalTileShown.x ||
+        leaderTileY !== this.lastPortalTileShown.y;
+      if (movedAway) {
+        // Player moved away, clear the tracking
+        this.lastPortalTileShown = undefined;
+      } else {
+        // Still on the same portal tile that we already showed - don't re-show
+        return;
+      }
+    }
+
+    // Only trigger when player is ON the portal tile (not just near it)
+    for (const portal of this.portals) {
+      if (portal.tileX === leaderTileX && portal.tileY === leaderTileY) {
+        this.showPortalPrompt(portal);
+        // Track that we've shown this portal
+        this.lastPortalTileShown = { x: portal.tileX, y: portal.tileY };
+        break;
+      }
+    }
+  }
+
+  private showPortalPrompt(portal: Portal) {
+    console.log(`[Game] Near portal at (${portal.tileX}, ${portal.tileY})`);
+
+    // Don't show modal if already exiting or modal is already open
+    if (this.isExitingDungeon || this.portalModalOverlay) return;
+
+    this.currentPortalForExit = portal;
+
+    // Create overlay
+    const uiW = this.uiCam?.width ?? this.scale.width;
+    const uiH = this.uiCam?.height ?? this.scale.height;
+
+    this.portalModalOverlay = this.add
+      .rectangle(0, 0, uiW, uiH, 0x000000, 0.75)
+      .setOrigin(0, 0)
+      .setInteractive();
+    this.uiLayer.add(this.portalModalOverlay);
+
+    // Create modal panel
+    const panelW = 400;
+    const panelH = 220;
+    const panelX = uiW / 2;
+    const panelY = uiH / 2;
+
+    this.portalModalPanel = this.add.container(panelX, panelY);
+    this.uiLayer.add(this.portalModalPanel);
+
+    // Panel background
+    const bg = this.add
+      .rectangle(0, 0, panelW, panelH, 0x1a1a2e)
+      .setStrokeStyle(2, 0x6dd5ff);
+    this.portalModalPanel.add(bg);
+
+    // Title
+    const title = this.add
+      .text(0, -panelH / 2 + 30, "Portal Discovered", {
+        fontSize: "24px",
+        color: "#6dd5ff",
+        fontFamily: "Arial",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5);
+    this.portalModalPanel.add(title);
+
+    // Description
+    const desc = this.add
+      .text(
+        0,
+        -20,
+        "This portal will take you back to town.\nYour progress will be saved.",
+        {
+          fontSize: "16px",
+          color: "#c8d1e1",
+          fontFamily: "Arial",
+          align: "center",
+        }
+      )
+      .setOrigin(0.5);
+    this.portalModalPanel.add(desc);
+
+    // "Leave Dungeon" button
+    const leaveBtn = this.add.rectangle(0, 50, 180, 40, 0xff6b6b);
+    const leaveBtnText = this.add
+      .text(0, 50, "Leave Dungeon", {
+        fontSize: "16px",
+        color: "#ffffff",
+        fontFamily: "Arial",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5);
+
+    leaveBtn.setInteractive({ useHandCursor: true });
+    leaveBtn.on("pointerover", () => leaveBtn.setFillStyle(0xff5252));
+    leaveBtn.on("pointerout", () => leaveBtn.setFillStyle(0xff6b6b));
+    leaveBtn.on("pointerdown", () => {
+      void this.exitViaPortal(portal);
+    });
+
+    this.portalModalPanel.add(leaveBtn);
+    this.portalModalPanel.add(leaveBtnText);
+
+    // "Keep Exploring" button
+    const continueBtn = this.add.rectangle(0, 100, 180, 40, 0x4ecca3);
+    const continueBtnText = this.add
+      .text(0, 100, "Keep Exploring", {
+        fontSize: "16px",
+        color: "#ffffff",
+        fontFamily: "Arial",
+        fontStyle: "bold",
+      })
+      .setOrigin(0.5);
+
+    continueBtn.setInteractive({ useHandCursor: true });
+    continueBtn.on("pointerover", () => continueBtn.setFillStyle(0x3dbb92));
+    continueBtn.on("pointerout", () => continueBtn.setFillStyle(0x4ecca3));
+    continueBtn.on("pointerdown", () => {
+      this.closePortalModal();
+    });
+
+    this.portalModalPanel.add(continueBtn);
+    this.portalModalPanel.add(continueBtnText);
+  }
+
+  private closePortalModal() {
+    if (this.portalModalOverlay) {
+      this.portalModalOverlay.destroy();
+      this.portalModalOverlay = undefined;
+    }
+    if (this.portalModalPanel) {
+      this.portalModalPanel.destroy();
+      this.portalModalPanel = undefined;
+    }
+    this.currentPortalForExit = undefined;
+  }
+
+  private async exitViaPortal(portal: Portal) {
+    // Prevent multiple exit attempts
+    if (this.isExitingDungeon) {
+      console.log("[Game] Already exiting, ignoring duplicate call");
+      return;
+    }
+    this.isExitingDungeon = true;
+
+    console.log(
+      `[Game] Exiting via portal at (${portal.tileX}, ${portal.tileY})`
+    );
+
+    // Mark portal as used on minimap
+    this.minimap.markPortalUsed(portal.tileX, portal.tileY);
+
+    // Show loading state by updating modal text
+    if (this.portalModalPanel) {
+      const loadingText = this.add
+        .text(0, 50, "Processing exit...", {
+          fontSize: "16px",
+          color: "#ffe66d",
+          fontFamily: "Arial",
+        })
+        .setOrigin(0.5);
+      this.portalModalPanel.add(loadingText);
+    }
+
+    // Call exit_adventure if we have the necessary data
+    if (this.adventurePda && this.playerPublicKey && this.adventureSession) {
+      try {
+        console.log("[Game] Getting connections...");
+        const connection = this.getSolanaConnection();
+        const eph = this.getEphemeralConnection();
+
+        if (!connection || !eph) {
+          console.error("[Game] No connection available for exit");
+          this.showExitError("Connection unavailable");
+          return;
+        }
+
+        // Get wallet provider
+        console.log("[Game] Getting wallet provider...");
+        const walletProvider = this.getWalletProvider();
+        console.log(
+          "[Game] Wallet provider:",
+          walletProvider
+            ? {
+                hasPublicKey: !!walletProvider.publicKey,
+                publicKey: walletProvider.publicKey?.toString(),
+                hasSignTransaction: !!walletProvider.signTransaction,
+                hasSignAndSend: !!walletProvider.signAndSendTransaction,
+              }
+            : "null"
+        );
+
+        if (!walletProvider || !walletProvider.publicKey) {
+          console.error("[Game] Wallet not connected");
+          this.showExitError("Please connect your wallet");
+          return;
+        }
+
+        // Import the function
+        console.log("[Game] Importing createExitAdventureInstruction...");
+        const { createExitAdventureInstruction } = await import(
+          "../state/adventureChain"
+        );
+
+        // Get hero mints from adventure session
+        console.log(
+          "[Game] Hero mints from session:",
+          this.adventureSession.heroMints
+        );
+        const heroMints = this.adventureSession.heroMints
+          .filter((mint) => mint !== "11111111111111111111111111111111")
+          .map((mint) => new PublicKey(mint));
+
+        console.log("[Game] Filtered hero mints:", heroMints.length);
+
+        if (heroMints.length === 0) {
+          console.warn("[Game] No heroes to unlock");
+          this.closePortalModal();
+          this.isExitingDungeon = false;
+          this.scene.start("TownScene");
+          return;
+        }
+
+        // Create exit instruction using actual wallet
+        console.log(
+          "[Game] Creating wallet pubkey from:",
+          walletProvider.publicKey.toString()
+        );
+        const walletPubkey = new PublicKey(walletProvider.publicKey.toString());
+
+        console.log("[Game] Creating exit instruction...");
+        console.log("[Game] - owner:", this.playerPublicKey.toBase58());
+        console.log("[Game] - authority:", walletPubkey.toBase58());
+        console.log("[Game] - adventurePda:", this.adventurePda.toBase58());
+        console.log(
+          "[Game] - heroMints:",
+          heroMints.map((m) => m.toBase58())
+        );
+
+        const ix = await createExitAdventureInstruction({
+          connection,
+          owner: this.playerPublicKey,
+          authority: walletPubkey,
+          adventurePda: this.adventurePda,
+          heroMints,
+          fromEphemeral: true, // Exiting from delegated state
+        });
+
+        console.log("[Game] Exit instruction created successfully");
+
+        // Build transaction for wallet signing
+        console.log("[Game] Getting latest blockhash from ephemeral...");
+        const { blockhash } = await eph.getLatestBlockhash("processed");
+        console.log("[Game] Blockhash:", blockhash);
+
+        const tx = new Transaction();
+        tx.feePayer = walletPubkey;
+        tx.recentBlockhash = blockhash;
+        tx.add(ix);
+
+        console.log("[Game] Transaction built, preparing to sign and send...");
+
+        console.log(
+          "[Game] Note: Exit with #[commit] macro MUST be sent to EPHEMERAL (hero mints are readonly now)"
+        );
+
+        // Simulate on EPHEMERAL where the delegated adventure account lives
+        console.log("[Game] Attempting transaction simulation on EPHEMERAL connection...");
+        try {
+          const simulation = await eph.simulateTransaction(tx);
+          if (simulation.value.err) {
+            console.error("[Game] Simulation error:", simulation.value.err);
+            console.error("[Game] Simulation logs:", simulation.value.logs);
+            throw new Error(
+              `Simulation failed: ${JSON.stringify(simulation.value.err)}`
+            );
+          } else {
+            console.log("[Game] Simulation successful!");
+            console.log("[Game] Simulation logs:", simulation.value.logs);
+          }
+        } catch (simErr) {
+          console.error(
+            "[Game] Simulation attempt failed:",
+            simErr
+          );
+          throw new Error("Transaction simulation failed.");
+        }
+
+        // Sign with wallet and send to EPHEMERAL
+        let signature: string;
+        if (walletProvider.signTransaction) {
+          console.log("[Game] Signing transaction with wallet...");
+          const signed = await walletProvider.signTransaction(tx);
+          console.log("[Game] Transaction signed, sending to ephemeral...");
+          signature = await eph.sendRawTransaction(signed.serialize(), {
+            skipPreflight: true,
+          });
+          console.log("[Game] Transaction sent to ephemeral:", signature);
+        } else {
+          throw new Error("Wallet does not support transaction signing");
+        }
+
+        console.log(`[Game] Exit transaction sent successfully: ${signature}`);
+
+        // Success - close modal and return to town
+        this.closePortalModal();
+        this.isExitingDungeon = false;
+        this.scene.start("TownScene");
+      } catch (err: any) {
+        console.error("[Game] Failed to exit adventure:", err);
+
+        // Handle user rejection separately
+        const message = err?.message ?? String(err);
+        if (
+          message.includes("User rejected") ||
+          message.includes("user rejected") ||
+          message.includes("cancelled") ||
+          message.includes("canceled")
+        ) {
+          this.showExitError("Transaction cancelled");
+        } else {
+          this.showExitError("Transaction failed. Please try again.");
+        }
+      }
+    } else {
+      // No adventure session, just go back to town
+      this.closePortalModal();
+      this.isExitingDungeon = false;
+      this.scene.start("TownScene");
+    }
+  }
+
+  private showExitError(message: string) {
+    this.isExitingDungeon = false;
+
+    // Update modal to show error
+    if (this.portalModalPanel) {
+      // Clear children and rebuild modal with error message
+      this.portalModalPanel.removeAll(true);
+
+      const panelW = 400;
+      const panelH = 220;
+
+      // Panel background
+      const bg = this.add
+        .rectangle(0, 0, panelW, panelH, 0x1a1a2e)
+        .setStrokeStyle(2, 0xff6b6b);
+      this.portalModalPanel.add(bg);
+
+      // Title
+      const title = this.add
+        .text(0, -panelH / 2 + 30, "Exit Failed", {
+          fontSize: "24px",
+          color: "#ff6b6b",
+          fontFamily: "Arial",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5);
+      this.portalModalPanel.add(title);
+
+      // Error message
+      const errorText = this.add
+        .text(0, -20, message, {
+          fontSize: "16px",
+          color: "#c8d1e1",
+          fontFamily: "Arial",
+          align: "center",
+        })
+        .setOrigin(0.5);
+      this.portalModalPanel.add(errorText);
+
+      // "Try Again" button
+      const retryBtn = this.add.rectangle(0, 50, 180, 40, 0xff6b6b);
+      const retryBtnText = this.add
+        .text(0, 50, "Try Again", {
+          fontSize: "16px",
+          color: "#ffffff",
+          fontFamily: "Arial",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5);
+
+      retryBtn.setInteractive({ useHandCursor: true });
+      retryBtn.on("pointerover", () => retryBtn.setFillStyle(0xff5252));
+      retryBtn.on("pointerout", () => retryBtn.setFillStyle(0xff6b6b));
+      retryBtn.on("pointerdown", () => {
+        if (this.currentPortalForExit) {
+          // Rebuild the original modal
+          this.closePortalModal();
+          this.showPortalPrompt(this.currentPortalForExit);
+        }
+      });
+
+      this.portalModalPanel.add(retryBtn);
+      this.portalModalPanel.add(retryBtnText);
+
+      // "Keep Exploring" button
+      const continueBtn = this.add.rectangle(0, 100, 180, 40, 0x4ecca3);
+      const continueBtnText = this.add
+        .text(0, 100, "Keep Exploring", {
+          fontSize: "16px",
+          color: "#ffffff",
+          fontFamily: "Arial",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5);
+
+      continueBtn.setInteractive({ useHandCursor: true });
+      continueBtn.on("pointerover", () => continueBtn.setFillStyle(0x3dbb92));
+      continueBtn.on("pointerout", () => continueBtn.setFillStyle(0x4ecca3));
+      continueBtn.on("pointerdown", () => {
+        this.closePortalModal();
+      });
+
+      this.portalModalPanel.add(continueBtn);
+      this.portalModalPanel.add(continueBtnText);
+    }
+  }
+
+  private getWalletProvider():
+    | {
+        publicKey?: { toString(): string } | null;
+        signTransaction?: (tx: Transaction) => Promise<Transaction>;
+        signAndSendTransaction?: (tx: Transaction) => Promise<string | any>;
+      }
+    | undefined {
+    if (typeof window === "undefined") return undefined;
+    const w = window as unknown as {
+      solana?: {
+        publicKey?: { toString(): string } | null;
+        signTransaction?: (tx: Transaction) => Promise<Transaction>;
+        signAndSendTransaction?: (tx: Transaction) => Promise<string | any>;
+      };
+    };
+    return w.solana;
   }
 
   // ==================== CHAIN INTEGRATION ====================
@@ -998,19 +1480,36 @@ export default class Game extends Phaser.Scene {
             "adventureSession",
             info.data
           );
-          const heroPositions = decodedData.heroPositions.map((p: any) => ({
-            x: Number(p.x),
-            y: Number(p.y),
-          }));
-          if (heroPositions.length === 0) return;
-
-          const pos = heroPositions[0];
+          const mapped = mapAdventureAccount(
+            this.adventurePda!,
+            decodedData as any
+          );
+          const pos = decodedData.partyPosition
+            ? {
+                x: Number(decodedData.partyPosition.x),
+                y: Number(decodedData.partyPosition.y),
+              }
+            : null;
+          if (!pos) return;
           console.log(
             `[Game] Position confirmed on-chain: (${pos.x}, ${pos.y})`
           );
 
+          if (this.adventureSession) {
+            this.adventureSession.heroSnapshots = mapped.heroSnapshots;
+            this.adventureSession.heroCount = mapped.heroCount;
+            this.adventureSession.heroMints = mapped.heroMints;
+            this.adventureSession.partyPosition = mapped.partyPosition;
+          } else {
+            this.adventureSession = mapped;
+          }
+          this.rebuildHeroHud();
+
           // Update confirmed position
           this.lastConfirmedTile = { x: pos.x, y: pos.y };
+
+          // Mark tile as explored in minimap
+          this.minimap.markTileExplored(pos.x, pos.y);
 
           // Remove confirmed moves from queue
           this.movementQueue = this.movementQueue.filter(
@@ -1181,6 +1680,10 @@ export default class Game extends Phaser.Scene {
       chests,
       portals,
     };
+
+    if (this.uiLayer) {
+      this.rebuildHeroHud();
+    }
   }
 
   private buildFallbackDungeon() {
@@ -1239,5 +1742,86 @@ export default class Game extends Phaser.Scene {
     }
     this.movementQueue = [];
     this.movementBusy = false;
+    this.closePortalModal();
+    this.lastPortalTileShown = undefined;
+    this.isExitingDungeon = false;
+    this.heroHudTexts.forEach((text) => text.destroy());
+    this.heroHudTexts = [];
+  }
+
+  private rebuildHeroHud() {
+    this.heroHudTexts.forEach((text) => text.destroy());
+    this.heroHudTexts = [];
+    if (!this.uiLayer) return;
+
+    const snapshots = this.adventureSession?.heroSnapshots ?? [];
+    if (!snapshots.length) return;
+
+    const startX = 16;
+    let cursorY = 16;
+    const maxHeroes = Math.min(this.partyLength, snapshots.length);
+
+    for (let index = 0; index < maxHeroes; index++) {
+      const snapshot = snapshots[index];
+      const label = this.formatHeroHud(snapshot, index);
+      const text = this.add
+        .text(startX, cursorY, label, {
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#dedede",
+          align: "left",
+          lineSpacing: 2,
+        })
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(10_000);
+
+      this.heroHudTexts.push(text);
+      this.uiLayer.add(text);
+      cursorY += text.height + 8;
+    }
+  }
+
+  private formatHeroHud(snapshot: ChainHeroSnapshot, index: number): string {
+    const heroMeta = this.partyHeroes[index];
+    const name = heroMeta?.name ?? `Hero ${snapshot.heroId}`;
+    const cls = heroMeta?.cls ?? "Unknown";
+    const stressCap = snapshot.stressMax > 0 ? snapshot.stressMax : 200;
+    const stressValue = Math.min(snapshot.stress, stressCap);
+    const hpLine = `HP ${snapshot.currentHp}/${snapshot.maxHp} | Stress ${stressValue}/${stressCap}`;
+    const statsLine = `ATK ${snapshot.attack} DEF ${snapshot.defense} MAG ${snapshot.magic} RES ${snapshot.resistance} SPD ${snapshot.speed} LCK ${snapshot.luck}`;
+    const statusLine = `Status: ${this.describeStatuses(snapshot.statusEffects)}`;
+    const traitsLine = `Traits: ${this.describeTraits(snapshot)}`;
+    return `${name} (${cls}) Lv ${snapshot.level}\n${hpLine}\n${statsLine}\n${statusLine}\n${traitsLine}`;
+  }
+
+  private describeStatuses(mask: number): string {
+    const active: string[] = [];
+    STATUS_EFFECT_NAMES.forEach((label, idx) => {
+      if ((mask & (1 << idx)) !== 0) {
+        active.push(label);
+      }
+    });
+    return active.length ? active.join(", ") : "None";
+  }
+
+  private describeTraits(snapshot: ChainHeroSnapshot): string {
+    const positives = (snapshot.positiveTraits ?? []).filter(
+      (id) => id !== TRAIT_NONE
+    );
+    const negatives = (snapshot.negativeTraits ?? []).filter(
+      (id) => id !== TRAIT_NONE
+    );
+
+    const positiveLabels = positives
+      .map((id) => findTrait("positive", id)?.name ?? `+${id}`)
+      .join(", ");
+    const negativeLabels = negatives
+      .map((id) => findTrait("negative", id)?.name ?? `-${id}`)
+      .join(", ");
+
+    const posText = positiveLabels || "None";
+    const negText = negativeLabels || "None";
+    return `+ ${posText} | - ${negText}`;
   }
 }

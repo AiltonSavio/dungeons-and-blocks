@@ -8,12 +8,8 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import { townStore } from "../state/townStore";
-import {
-  ItemDefinition,
-  MARKET_ITEMS,
-  MAX_HEROES,
-  TownState,
-} from "../state/models";
+import { ItemDefinition, MARKET_ITEMS, MAX_HEROES } from "../state/models";
+import type { ItemId } from "../state/items";
 import {
   SAFE_MARGIN,
   UI_FONT,
@@ -34,15 +30,33 @@ import {
   createInitializePlayerInstruction,
   createMintHeroInstruction,
   canLevelUpHero,
-  createLevelUpInstruction,
+  createLevelUpHeroInstruction,
   getNextLevelRequirement,
+  createRerollStatsInstruction,
+  createRelieveStressInstruction,
+  createApplyBlessingInstruction,
+  HERO_BLACKSMITH_COST,
+  HERO_BLACKSMITH_MAX_REROLLS,
+  HERO_ABBEY_COST,
+  createHealHeroInstruction,
+  HERO_TAVERN_HEAL_COST_PER_HP,
+  createBurnHeroInstruction,
+  createCureStatusEffectInstruction,
+  createCureNegativeTraitInstruction,
+  HERO_SANITARIUM_STATUS_CURE_COST,
+  HERO_SANITARIUM_TRAIT_CURE_COST,
 } from "../state/heroChain";
+import {
+  fetchHeroLockStatuses,
+  type HeroLockStatus,
+} from "../state/adventureChain";
 
 import {
   BuildingKey,
   GOLD_PANEL_WIDTH,
   WALLET_PANEL_HEIGHT,
   WALLET_PANEL_WIDTH,
+  AIRDROP_BUTTON_WIDTH,
 } from "./town/constants";
 import { createButton } from "./town/ui/createButton";
 import {
@@ -54,6 +68,15 @@ import {
 import { TooltipManager } from "./town/ui/TooltipManager";
 import { RosterPanel, RosterPanelState } from "./town/RosterPanel";
 import { formatHeroTimestamp } from "./town/heroFormatting";
+import {
+  createGrantHourlyGoldInstruction,
+  createBuyItemInstruction,
+  createSellItemInstruction,
+  createInitializeEconomyInstruction,
+  fetchPlayerEconomy,
+  HOURLY_GRANT_AMOUNT,
+  HOURLY_GRANT_COOLDOWN_SECONDS,
+} from "../state/economyChain";
 
 type ToastEntry = {
   container: Phaser.GameObjects.Container;
@@ -84,10 +107,11 @@ type SolanaProvider = {
   signTransaction?: (tx: Transaction) => Promise<Transaction>;
 };
 
+const PLAYER_ECONOMY_COOLDOWN_ERROR = 6010;
+
 export class TownScene extends Phaser.Scene {
   private safe = SAFE_MARGIN;
   private store = townStore;
-  private state!: TownState;
 
   private worldLayer!: Phaser.GameObjects.Container;
   private uiLayer!: Phaser.GameObjects.Container;
@@ -106,10 +130,16 @@ export class TownScene extends Phaser.Scene {
   private walletBusy = false;
   private walletConnectHandler?: (publicKey: WalletPublicKey) => void;
   private walletDisconnectHandler?: () => void;
+  private grantPanel!: Phaser.GameObjects.Container;
+  private grantStatusText?: Phaser.GameObjects.Text;
+  private grantBusy = false;
+  private nextGrantAvailableAt = 0;
+  private grantCooldownTimer?: Phaser.Time.TimerEvent;
   private solanaConnection?: Connection;
   private heroes: ChainHero[] = [];
   private heroesLoading = false;
   private heroLoadError?: string;
+  private heroLockStatuses: Map<string, HeroLockStatus> = new Map();
   private playerProfile: PlayerProfile | null | undefined;
   private programBusy = false;
 
@@ -141,7 +171,7 @@ export class TownScene extends Phaser.Scene {
   }
 
   init() {
-    this.state = this.store.getState();
+    // Initialization logic
   }
 
   create() {
@@ -182,6 +212,7 @@ export class TownScene extends Phaser.Scene {
       uiLayer: this.uiLayer,
     });
     this.walletPanel = topBar.walletPanel;
+    this.grantPanel = topBar.grantPanel;
     this.goldPanel = topBar.goldPanel;
 
     this.rosterPanel = new RosterPanel({
@@ -197,6 +228,7 @@ export class TownScene extends Phaser.Scene {
     this.rosterPanel.init();
 
     this.initWalletIntegration();
+    this.updateGrantButton();
 
     renderEmbarkCTA({
       scene: this,
@@ -210,8 +242,7 @@ export class TownScene extends Phaser.Scene {
 
     this.bindInputs();
 
-    this.unsubChange = this.store.subscribe((state) => {
-      this.state = state;
+    this.unsubChange = this.store.subscribe(() => {
       this.refreshUI();
     });
     this.unsubToast = this.store.onToast((message) => this.showToast(message));
@@ -238,6 +269,10 @@ export class TownScene extends Phaser.Scene {
       this.releaseKeyboardBindings();
       this.teardownWalletIntegration();
       this.rosterPanel.destroy();
+      if (this.grantCooldownTimer) {
+        this.grantCooldownTimer.remove(false);
+        this.grantCooldownTimer = undefined;
+      }
     });
 
     this.input.on(
@@ -277,6 +312,7 @@ export class TownScene extends Phaser.Scene {
 
   private refreshUI() {
     this.renderGold();
+    this.updateGrantButton();
     this.updateRosterPanel();
   }
 
@@ -286,6 +322,7 @@ export class TownScene extends Phaser.Scene {
       heroes: this.heroes,
       heroesLoading: this.heroesLoading,
       heroLoadError: this.heroLoadError,
+      heroLockStatuses: this.heroLockStatuses,
       expandedHeroId: this.expandedHeroId,
     };
     this.rosterPanel?.update(rosterState);
@@ -297,13 +334,14 @@ export class TownScene extends Phaser.Scene {
       heroes: [...this.heroes],
       heroesLoading: this.heroesLoading,
       heroLoadError: this.heroLoadError,
+      heroLockStatuses: this.heroLockStatuses,
       walletAddress: this.walletAddress,
     });
   }
 
   private renderGold() {
     this.goldPanel.removeAll(true);
-    const gold = this.state.inventory.gold;
+    const gold = this.store.getInventory().gold;
     const plate = this.add
       .rectangle(0, 0, GOLD_PANEL_WIDTH, 24, 0x252b3a)
       .setOrigin(1, 0);
@@ -353,6 +391,7 @@ export class TownScene extends Phaser.Scene {
       this.playerProfile = undefined;
       this.updateWalletControl();
       this.loadHeroes(address);
+      this.syncEconomyFromChain();
     };
 
     this.walletDisconnectHandler = () => {
@@ -361,6 +400,7 @@ export class TownScene extends Phaser.Scene {
       this.heroes = [];
       this.heroesLoading = false;
       this.heroLoadError = undefined;
+      this.heroLockStatuses.clear();
       this.expandedHeroId = undefined;
       this.playerProfile = undefined;
       this.updateWalletControl();
@@ -378,6 +418,7 @@ export class TownScene extends Phaser.Scene {
         this.walletAddress = address;
         this.playerProfile = undefined;
         this.loadHeroes(address);
+        this.syncEconomyFromChain();
       }
     }
     this.updateWalletControl();
@@ -426,6 +467,7 @@ export class TownScene extends Phaser.Scene {
         this.walletAddress = address;
         this.showToast(`Connected ${this.shortenAddress(address)}`);
         this.loadHeroes(address);
+        this.syncEconomyFromChain();
       }
     } catch (err) {
       const message =
@@ -461,6 +503,7 @@ export class TownScene extends Phaser.Scene {
       this.heroes = [];
       this.heroesLoading = false;
       this.heroLoadError = undefined;
+      this.heroLockStatuses.clear();
       this.expandedHeroId = undefined;
       this.updateWalletControl();
       this.updateRosterPanel();
@@ -490,7 +533,34 @@ export class TownScene extends Phaser.Scene {
       if (this.walletAddress !== requestOwner) return;
       // Pending requests should be filtered out, but some older mints may not
       // populate the flag. Treat undefined as settled so legacy heroes appear.
-      this.heroes = heroes.filter((hero) => (hero.pendingRequest ?? 0) === 0);
+      // Also filter out burned heroes.
+      const filteredHeroes = heroes.filter(
+        (hero) => (hero.pendingRequest ?? 0) === 0 && !hero.isBurned
+      );
+
+      // Fetch hero lock statuses
+      const heroMints = filteredHeroes.map(
+        (hero) => new PublicKey(hero.account)
+      );
+      this.heroLockStatuses = await fetchHeroLockStatuses(
+        connection,
+        heroMints
+      );
+
+      // Sort heroes: inactive (is_active: false) first, then active (is_active: true)
+      this.heroes = filteredHeroes.sort((a, b) => {
+        const aStatus = this.heroLockStatuses.get(a.account);
+        const bStatus = this.heroLockStatuses.get(b.account);
+        const aActive = aStatus?.isActive ?? false;
+        const bActive = bStatus?.isActive ?? false;
+
+        // Sort: false < true (inactive heroes first)
+        if (aActive === bActive) {
+          return a.id - b.id; // Secondary sort by ID
+        }
+        return aActive ? 1 : -1;
+      });
+
       this.playerProfile = profile;
     } catch (error) {
       if (this.walletAddress !== requestOwner) return;
@@ -498,6 +568,7 @@ export class TownScene extends Phaser.Scene {
         error instanceof Error ? error.message : "Failed to load heroes.";
       this.heroLoadError = message;
       this.heroes = [];
+      this.heroLockStatuses.clear();
       this.playerProfile = null;
     } finally {
       if (this.walletAddress !== requestOwner) return;
@@ -742,7 +813,7 @@ export class TownScene extends Phaser.Scene {
     }
 
     const owner = new PublicKey(this.walletAddress);
-    const instruction = createLevelUpInstruction({
+    const instruction = createLevelUpHeroInstruction({
       owner,
       heroId: hero.id,
     });
@@ -784,38 +855,44 @@ export class TownScene extends Phaser.Scene {
     tx.feePayer = owner;
     tx.recentBlockhash = latestBlockhash.blockhash;
 
-    // UNCOMMENT TO DEBUG: Try to simulate first to catch errors
-    // console.log("Attempting transaction simulation...");
-    // try {
-    //   const simulation = await connection.simulateTransaction(tx);
-    //   if (simulation.value.err) {
-    //     console.error("Simulation error:", simulation.value.err);
-    //     console.error("Simulation logs:", simulation.value.logs);
-    //     throw new Error(
-    //       `Simulation failed: ${JSON.stringify(simulation.value.err)}`
-    //     );
-    //   } else {
-    //     console.log("Simulation successful");
-    //     console.log("Simulation logs:", simulation.value.logs);
-    //   }
-    // } catch (simErr) {
-    //   console.error(
-    //     "Simulation attempt failed (this might be expected):",
-    //     simErr
-    //   );
-    //   throw new Error("Transaction simulation failed.");
-    // }
+    // Simulate first
+    console.log("Attempting transaction simulation...");
+    try {
+      const simulation = await connection.simulateTransaction(tx);
+      if (simulation.value.err) {
+        console.error("Simulation error:", simulation.value.err);
+        console.error("Simulation logs:", simulation.value.logs);
+        throw new Error(
+          `Simulation failed: ${JSON.stringify(simulation.value.err)}`
+        );
+      } else {
+        console.log("Simulation successful");
+        console.log("Simulation logs:", simulation.value.logs);
+      }
+    } catch (simErr) {
+      console.error("Simulation attempt failed:", simErr);
+      throw new Error("Transaction simulation failed.");
+    }
 
-    // Sign the transaction
+    // Sign and send
     let signature: string;
+    let needsConfirmation = false;
+
     try {
       if (provider.signAndSendTransaction) {
+        // Provider handles sending AND confirming
         const result = await provider.signAndSendTransaction(tx);
         signature =
           typeof result === "string" ? result : result.signature ?? "";
+        needsConfirmation = false; // Provider already confirmed
       } else if (provider.signTransaction) {
+        // We need to send and confirm manually
         const signed = await provider.signTransaction(tx);
-        signature = await connection.sendRawTransaction(signed.serialize());
+        signature = await connection.sendRawTransaction(signed.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: "confirmed",
+        });
+        needsConfirmation = true;
       } else {
         throw new Error("Wallet does not support transaction signing.");
       }
@@ -824,30 +901,36 @@ export class TownScene extends Phaser.Scene {
         throw new Error("Transaction signature missing.");
       }
     } catch (err) {
+      console.error("Transaction signing/sending failed:", err);
       throw err;
     }
 
-    // Wait for confirmation
-    try {
-      const confirmation = await connection.confirmTransaction(
-        {
-          signature,
-          blockhash: latestBlockhash.blockhash,
-          lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
-        },
-        "confirmed"
-      );
-
-      if (confirmation.value.err) {
-        throw new Error(
-          `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+    // Only confirm if we sent it ourselves
+    if (needsConfirmation) {
+      try {
+        const confirmation = await connection.confirmTransaction(
+          {
+            signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+          },
+          "confirmed"
         );
-      }
 
-      return signature;
-    } catch (err) {
-      throw err;
+        if (confirmation.value.err) {
+          throw new Error(
+            `Transaction failed: ${JSON.stringify(confirmation.value.err)}`
+          );
+        }
+      } catch (err) {
+        console.error("Transaction confirmation failed:", err);
+        throw err;
+      }
+    } else {
+      console.log("Transaction confirmed by wallet provider");
     }
+
+    return signature;
   }
 
   private handleProgramError(error: unknown, fallback: string) {
@@ -864,6 +947,28 @@ export class TownScene extends Phaser.Scene {
       console.error(error);
       this.showToast(fallback);
     }
+  }
+
+  private extractCustomErrorCode(error: unknown): number | null {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : null;
+    if (!message) return null;
+
+    const decimalMatch = message.match(/Custom\((\d+)\)/);
+    if (decimalMatch) {
+      return Number(decimalMatch[1]);
+    }
+
+    const hexMatch = message.match(/custom program error:\s*0x([0-9a-f]+)/i);
+    if (hexMatch) {
+      return parseInt(hexMatch[1], 16);
+    }
+
+    return null;
   }
 
   private updateWalletControl() {
@@ -941,6 +1046,690 @@ export class TownScene extends Phaser.Scene {
           this.connectWallet();
         }
       });
+
+    this.updateGrantButton();
+  }
+
+  private updateGrantButton() {
+    if (!this.grantPanel) return;
+
+    this.grantPanel.removeAll(true);
+
+    const provider = this.getWalletProvider();
+    const hasProvider = Boolean(provider);
+    const connected = Boolean(this.walletAddress);
+    const now = Date.now();
+    const onCooldown = this.nextGrantAvailableAt > now;
+    const cooldownMinutes = onCooldown
+      ? Math.max(1, Math.ceil((this.nextGrantAvailableAt - now) / 60000))
+      : 0;
+    const cooldownText =
+      cooldownMinutes > 0 ? `Cooldown ~${cooldownMinutes}m` : "On cooldown";
+    const ready =
+      hasProvider &&
+      connected &&
+      !this.walletBusy &&
+      !this.programBusy &&
+      !this.grantBusy &&
+      !onCooldown;
+
+    const baseColor = !hasProvider
+      ? PANEL_COLORS.disabled
+      : ready
+      ? PANEL_COLORS.highlight
+      : PANEL_COLORS.disabled;
+    const hoverColor = ready ? PANEL_COLORS.hover : baseColor;
+
+    const plate = this.add
+      .rectangle(0, 0, AIRDROP_BUTTON_WIDTH, WALLET_PANEL_HEIGHT, baseColor)
+      .setOrigin(0);
+    plate.setStrokeStyle(1, 0x40485c, 1);
+    this.grantPanel.add(plate);
+
+    this.grantPanel.add(
+      this.add
+        .text(12, 6, "Gold Airdrop", {
+          ...UI_FONT.caption,
+          color: "#6a7188",
+        })
+        .setOrigin(0, 0)
+    );
+
+    const status = !hasProvider
+      ? "No wallet detected"
+      : !connected
+      ? "Connect your wallet"
+      : this.walletBusy || this.programBusy
+      ? "Wallet busy..."
+      : this.grantBusy
+      ? "Claiming..."
+      : onCooldown
+      ? cooldownText
+      : "Claim 200 gold";
+    const statusColor = ready ? "#ffe28a" : "#c1c6db";
+
+    this.grantStatusText = this.add
+      .text(12, 18, status, {
+        ...UI_FONT.body,
+        fontSize: "12px",
+        color: statusColor,
+      })
+      .setOrigin(0, 0);
+    this.grantPanel.add(this.grantStatusText);
+
+    if (ready) {
+      plate
+        .setInteractive({ cursor: "pointer" })
+        .on("pointerover", () => plate.setFillStyle(hoverColor))
+        .on("pointerout", () => plate.setFillStyle(baseColor))
+        .on("pointerdown", () => this.requestHourlyGrant());
+    } else {
+      const cursor =
+        this.walletBusy || this.programBusy || this.grantBusy
+          ? "wait"
+          : "not-allowed";
+      plate.setInteractive({ cursor });
+    }
+
+    this.scheduleGrantReset();
+  }
+
+  private scheduleGrantReset() {
+    if (this.grantCooldownTimer) {
+      this.grantCooldownTimer.remove(false);
+      this.grantCooldownTimer = undefined;
+    }
+
+    const remaining = this.nextGrantAvailableAt - Date.now();
+    if (remaining > 0) {
+      this.grantCooldownTimer = this.time.delayedCall(remaining, () => {
+        this.grantCooldownTimer = undefined;
+        this.nextGrantAvailableAt = 0;
+        this.updateGrantButton();
+      });
+    }
+  }
+
+  private async requestHourlyGrant() {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.grantBusy || this.programBusy) return;
+
+    const provider = this.getWalletProvider();
+    const connection = this.getSolanaConnection();
+    if (!provider) {
+      this.showToast("Wallet provider unavailable.");
+      return;
+    }
+    if (!connection) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    this.programBusy = true;
+    this.grantBusy = true;
+    this.updateGrantButton();
+
+    try {
+      // Ensure economy account is initialized
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        this.showToast("Failed to initialize economy account.");
+        return;
+      }
+
+      const owner = new PublicKey(this.walletAddress);
+      const instruction = createGrantHourlyGoldInstruction(owner);
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(`Vault credited with ${HOURLY_GRANT_AMOUNT} gold.`);
+
+      // Sync from chain to update local state
+      await this.syncEconomyFromChain();
+
+      this.nextGrantAvailableAt =
+        Date.now() + HOURLY_GRANT_COOLDOWN_SECONDS * 1000;
+      this.updateGrantButton();
+    } catch (err) {
+      const code = this.extractCustomErrorCode(err);
+      if (code === PLAYER_ECONOMY_COOLDOWN_ERROR) {
+        this.showToast("Hourly grant still on cooldown.");
+        const retryAt = Date.now() + 60 * 1000;
+        if (this.nextGrantAvailableAt < retryAt) {
+          this.nextGrantAvailableAt = retryAt;
+        }
+        this.updateGrantButton();
+      } else {
+        this.handleProgramError(err, "Failed to claim hourly grant.");
+      }
+    } finally {
+      this.grantBusy = false;
+      this.programBusy = false;
+      this.updateGrantButton();
+    }
+  }
+
+  private async ensureEconomyInitialized(): Promise<boolean> {
+    if (!this.walletAddress) return false;
+
+    const connection = this.getSolanaConnection();
+    if (!connection) return false;
+
+    try {
+      const owner = new PublicKey(this.walletAddress);
+      const economy = await fetchPlayerEconomy(connection, owner);
+
+      if (economy) {
+        return true; // Already initialized
+      }
+
+      // Need to initialize
+      this.showToast("Initializing your economy account...");
+      const instruction = createInitializeEconomyInstruction(owner);
+      await this.sendProgramTransaction([instruction]);
+      this.showToast("Economy account initialized!");
+      return true;
+    } catch (err) {
+      console.error("Failed to ensure economy initialized:", err);
+      this.showToast("Failed to initialize economy account.");
+      return false;
+    }
+  }
+
+  private async syncEconomyFromChain() {
+    if (!this.walletAddress) return;
+
+    const connection = this.getSolanaConnection();
+    if (!connection) return;
+
+    try {
+      const owner = new PublicKey(this.walletAddress);
+      const economy = await fetchPlayerEconomy(connection, owner);
+
+      if (economy) {
+        // Map on-chain items array to ItemId record
+        const itemIds: ItemId[] = [
+          "pouch_gold",
+          "stress_tonic",
+          "minor_torch",
+          "healing_salve",
+          "mystery_relic",
+          "calming_incense",
+          "phoenix_feather",
+        ];
+
+        const items: Record<ItemId, number> = {} as Record<ItemId, number>;
+        for (let i = 0; i < economy.items.length; i++) {
+          items[itemIds[i]] = economy.items[i];
+        }
+
+        // Sync using the public API
+        this.store.syncInventoryFromChain(Number(economy.gold), items);
+      }
+    } catch (err) {
+      console.error("Failed to sync economy from chain:", err);
+    }
+  }
+
+  private async buyItemOnChain(itemId: ItemId) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    this.programBusy = true;
+
+    try {
+      // Ensure economy account is initialized
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        this.showToast("Failed to initialize economy account.");
+        return;
+      }
+
+      const owner = new PublicKey(this.walletAddress);
+      const instruction = createBuyItemInstruction(owner, itemId, 1);
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(`Purchased 1x ${itemId.replace("_", " ")}.`);
+
+      // Sync from chain to update local state
+      await this.syncEconomyFromChain();
+    } catch (err) {
+      this.handleProgramError(err, "Failed to purchase item.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async sellItemOnChain(itemId: ItemId) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    this.programBusy = true;
+
+    try {
+      // Ensure economy account is initialized
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        this.showToast("Failed to initialize economy account.");
+        return;
+      }
+
+      const owner = new PublicKey(this.walletAddress);
+      const instruction = createSellItemInstruction(owner, itemId, 1);
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(`Sold 1x ${itemId.replace("_", " ")}.`);
+
+      // Sync from chain to update local state
+      await this.syncEconomyFromChain();
+    } catch (err) {
+      this.handleProgramError(err, "Failed to sell item.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private isHeroLocked(hero: ChainHero): boolean {
+    const status = this.heroLockStatuses.get(hero.account);
+    return (status?.isActive ?? false) || hero.locked;
+  }
+
+  private async rerollHeroStats(hero: ChainHero) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Locked heroes cannot visit the blacksmith.");
+      return;
+    }
+    if (hero.rerollCount >= HERO_BLACKSMITH_MAX_REROLLS) {
+      this.showToast("Reroll limit reached for this hero.");
+      return;
+    }
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        return;
+      }
+
+      const instruction = createRerollStatsInstruction({
+        owner,
+        heroId: hero.id,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Blacksmith reroll queued for Hero #${hero.id} (cost ${HERO_BLACKSMITH_COST}g).`
+      );
+      await this.syncEconomyFromChain();
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openBlacksmith();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to reroll hero stats.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async healHero(hero: ChainHero, requestedAmount: number) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Locked heroes must return from adventures first.");
+      return;
+    }
+
+    const missing = Math.max(0, hero.maxHp - hero.currentHp);
+    if (missing <= 0) {
+      this.showToast("Hero is already at full health.");
+      return;
+    }
+
+    const amount = Math.min(missing, Math.max(1, Math.floor(requestedAmount)));
+    const cost = amount * HERO_TAVERN_HEAL_COST_PER_HP;
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        return;
+      }
+
+      const instruction = createHealHeroInstruction({
+        owner,
+        heroId: hero.id,
+        amount,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Healed ${amount} HP on Hero #${hero.id} for ${cost} gold.`
+      );
+      await this.syncEconomyFromChain();
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openTavern();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to heal hero.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private healHeroToFull(hero: ChainHero) {
+    const missing = Math.max(0, hero.maxHp - hero.currentHp);
+    if (missing <= 0) {
+      this.showToast("Hero is already at full health.");
+      return;
+    }
+    void this.healHero(hero, missing);
+  }
+
+  private async relieveHeroStress(hero: ChainHero) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Locked heroes cannot visit the abbey.");
+      return;
+    }
+    if (hero.stress <= 0) {
+      this.showToast("No stress to relieve for this hero.");
+      return;
+    }
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        return;
+      }
+
+      const instruction = createRelieveStressInstruction({
+        owner,
+        heroId: hero.id,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Abbey service complete for Hero #${hero.id} (cost ${HERO_ABBEY_COST}g).`
+      );
+      await this.syncEconomyFromChain();
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openAbbey();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to relieve stress.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async blessHero(hero: ChainHero) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Locked heroes cannot visit the abbey.");
+      return;
+    }
+    if (hero.blessed) {
+      this.showToast("Hero is already blessed.");
+      return;
+    }
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        return;
+      }
+
+      const instruction = createApplyBlessingInstruction({
+        owner,
+        heroId: hero.id,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Blessing bestowed on Hero #${hero.id} (cost ${HERO_ABBEY_COST}g).`
+      );
+      await this.syncEconomyFromChain();
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openAbbey();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to bless hero.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async cureStatusEffect(hero: ChainHero, effectType: number) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Locked heroes cannot visit the sanitarium.");
+      return;
+    }
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        return;
+      }
+
+      const instruction = createCureStatusEffectInstruction({
+        owner,
+        heroId: hero.id,
+        effectType,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Status effect cured on Hero #${hero.id} (cost ${HERO_SANITARIUM_STATUS_CURE_COST}g).`
+      );
+      await this.syncEconomyFromChain();
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openSanitarium();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to cure status effect.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async cureNegativeTrait(hero: ChainHero, traitIndex: number) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Locked heroes cannot visit the sanitarium.");
+      return;
+    }
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const initialized = await this.ensureEconomyInitialized();
+      if (!initialized) {
+        return;
+      }
+
+      const instruction = createCureNegativeTraitInstruction({
+        owner,
+        heroId: hero.id,
+        traitIndex,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(
+        `Negative trait cured on Hero #${hero.id} (cost ${HERO_SANITARIUM_TRAIT_CURE_COST}g).`
+      );
+      await this.syncEconomyFromChain();
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openSanitarium();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to cure negative trait.");
+    } finally {
+      this.programBusy = false;
+    }
+  }
+
+  private async burnHero(hero: ChainHero) {
+    if (!this.walletAddress) {
+      this.showToast("Connect your wallet first.");
+      return;
+    }
+    if (this.programBusy) {
+      this.showToast("Another transaction is processing.");
+      return;
+    }
+    if (this.isHeroLocked(hero)) {
+      this.showToast("Cannot burn a hero that is currently adventuring.");
+      return;
+    }
+
+    if (!this.getSolanaConnection()) {
+      this.showToast("RPC unavailable.");
+      return;
+    }
+
+    const owner = new PublicKey(this.walletAddress);
+
+    this.programBusy = true;
+    try {
+      const instruction = createBurnHeroInstruction({
+        owner,
+        heroId: hero.id,
+      });
+
+      await this.sendProgramTransaction([instruction]);
+      this.showToast(`Hero #${hero.id} has been burned.`);
+      await this.loadHeroes(this.walletAddress);
+      if (this.modalPanel) {
+        this.closeModal();
+      }
+    } catch (err) {
+      this.handleProgramError(err, "Failed to burn hero.");
+    } finally {
+      this.programBusy = false;
+    }
   }
 
   private getWalletProvider(): SolanaProvider | undefined {
@@ -1304,6 +2093,7 @@ export class TownScene extends Phaser.Scene {
       } else {
         infoLines.push("Further summons draw 100 gold from your vault.");
       }
+      infoLines.push("Tavern staff heal injured heroes for 1 gold per HP.");
 
       const infoText = infoLines.join("\n");
       const info = this.add
@@ -1356,9 +2146,73 @@ export class TownScene extends Phaser.Scene {
           .setOrigin(0, 0);
         block.add(minted);
 
+        const hpLine = this.add
+          .text(
+            0,
+            minted.y + minted.height + 4,
+            `HP ${hero.currentHp}/${hero.maxHp}`,
+            {
+              ...UI_FONT.caption,
+              color: hero.currentHp < hero.maxHp ? "#ffe28a" : "#8de9a3",
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(hpLine);
+
+        const locked = this.isHeroLocked(hero);
+        const missingHp = Math.max(0, hero.maxHp - hero.currentHp);
+        const healOneEnabled = missingHp > 0 && !locked && !this.programBusy;
+        const healFullCost = missingHp * HERO_TAVERN_HEAL_COST_PER_HP;
+
+        const healOneBtn = createButton(
+          this,
+          0,
+          hpLine.y + hpLine.height + 8,
+          170,
+          `Heal +1 HP (${HERO_TAVERN_HEAL_COST_PER_HP}g)`,
+          () => this.healHero(hero, 1),
+          healOneEnabled
+        );
+        block.add(healOneBtn);
+
+        const healFullBtn = createButton(
+          this,
+          190,
+          hpLine.y + hpLine.height + 8,
+          210,
+          `Heal to Full (${healFullCost}g)`,
+          () => this.healHeroToFull(hero),
+          missingHp > 0 && !locked && !this.programBusy
+        );
+        block.add(healFullBtn);
+
+        let blockBottom = Math.max(
+          healOneBtn.y + BUTTON_DIMENSIONS.height,
+          healFullBtn.y + BUTTON_DIMENSIONS.height
+        );
+
+        if (locked) {
+          const lockedText = this.add
+            .text(0, blockBottom + 4, "Hero is currently adventuring.", {
+              ...UI_FONT.caption,
+              color: "#ffb878",
+            })
+            .setOrigin(0, 0);
+          block.add(lockedText);
+          blockBottom = lockedText.y + lockedText.height;
+        } else if (missingHp === 0) {
+          const fullText = this.add
+            .text(0, blockBottom + 4, "Already at full health.", {
+              ...UI_FONT.caption,
+              color: "#8de9a3",
+            })
+            .setOrigin(0, 0);
+          block.add(fullText);
+          blockBottom = fullText.y + fullText.height;
+        }
+
         panel.add(block);
-        const blockHeight = minted.y + minted.height;
-        return innerOffset + blockHeight + 18;
+        return innerOffset + blockBottom + 18;
       });
     });
   }
@@ -1369,7 +2223,7 @@ export class TownScene extends Phaser.Scene {
         .text(
           0,
           0,
-          "Track and remedy persistent afflictions from your on-chain roster.",
+          "Cure status effects (10g) and negative traits (25g) from your heroes.",
           {
             ...UI_FONT.body,
             wordWrap: { width: 432 },
@@ -1379,12 +2233,6 @@ export class TownScene extends Phaser.Scene {
       panel.add(intro);
 
       this.renderHeroModalSection(panel, intro.height + 16, (hero, offset) => {
-        const ailments = hero.negativeQuirks.map((id) => getQuirkLabel(id));
-        const summary =
-          ailments.length > 0
-            ? ailments.join(", ")
-            : "No negative traits detected.";
-
         const block = this.add.container(0, offset);
         const header = this.add
           .text(0, 0, `Hero #${hero.id}`, {
@@ -1394,18 +2242,103 @@ export class TownScene extends Phaser.Scene {
           .setOrigin(0, 0);
         block.add(header);
 
-        const detail = this.add
-          .text(0, header.height + 4, summary, {
-            ...UI_FONT.caption,
-            color: ailments.length ? "#ff9d7d" : "#9fa6c0",
-            wordWrap: { width: 432 },
-          })
+        let yPos = header.height + 4;
+
+        // Status effects section
+        const statusNames = ["Bleeding", "Poison", "Burn", "Chill"];
+        const activeStatuses: number[] = [];
+        for (let i = 0; i < 4; i++) {
+          if ((hero.statusEffects & (1 << i)) !== 0) {
+            activeStatuses.push(i);
+          }
+        }
+
+        const statusText = this.add
+          .text(
+            0,
+            yPos,
+            activeStatuses.length > 0
+              ? `Status Effects: ${activeStatuses.map((i) => statusNames[i]).join(", ")}`
+              : "No active status effects.",
+            {
+              ...UI_FONT.caption,
+              color: activeStatuses.length > 0 ? "#ffb878" : "#9fa6c0",
+              wordWrap: { width: 432 },
+            }
+          )
           .setOrigin(0, 0);
-        block.add(detail);
+        block.add(statusText);
+        yPos = statusText.y + statusText.height + 4;
+
+        // Cure status effect buttons
+        if (activeStatuses.length > 0) {
+          const locked = this.isHeroLocked(hero);
+          activeStatuses.forEach((effectType, idx) => {
+            const btn = createButton(
+              this,
+              idx * 110,
+              yPos,
+              100,
+              `Cure ${statusNames[effectType]} (${HERO_SANITARIUM_STATUS_CURE_COST}g)`,
+              () => this.cureStatusEffect(hero, effectType),
+              !locked && !this.programBusy
+            );
+            block.add(btn);
+          });
+          yPos += BUTTON_DIMENSIONS.height + 8;
+        }
+
+        // Negative traits section
+        const negativeTraits = hero.negativeQuirks.map((id) => getQuirkLabel(id));
+        const traitsText = this.add
+          .text(
+            0,
+            yPos,
+            negativeTraits.length > 0
+              ? `Negative Traits: ${negativeTraits.join(", ")}`
+              : "No negative traits.",
+            {
+              ...UI_FONT.caption,
+              color: negativeTraits.length > 0 ? "#ff9d7d" : "#9fa6c0",
+              wordWrap: { width: 432 },
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(traitsText);
+        yPos = traitsText.y + traitsText.height + 4;
+
+        // Cure trait buttons
+        if (negativeTraits.length > 0) {
+          const locked = this.isHeroLocked(hero);
+          hero.negativeQuirks.forEach((traitId, idx) => {
+            const btn = createButton(
+              this,
+              idx * 150,
+              yPos,
+              140,
+              `Cure ${getQuirkLabel(traitId)} (${HERO_SANITARIUM_TRAIT_CURE_COST}g)`,
+              () => this.cureNegativeTrait(hero, idx),
+              !locked && !this.programBusy
+            );
+            block.add(btn);
+          });
+          yPos += BUTTON_DIMENSIONS.height + 8;
+        }
+
+        // Locked warning
+        if (this.isHeroLocked(hero)) {
+          const lockedText = this.add
+            .text(0, yPos, "Hero must return from adventure first.", {
+              ...UI_FONT.caption,
+              color: "#ffb878",
+            })
+            .setOrigin(0, 0);
+          block.add(lockedText);
+          yPos = lockedText.y + lockedText.height;
+        }
 
         panel.add(block);
-        const blockHeight = detail.y + detail.height;
-        return offset + blockHeight + 16;
+        return offset + yPos + 16;
       });
     });
   }
@@ -1462,9 +2395,63 @@ export class TownScene extends Phaser.Scene {
           .setOrigin(0, 0);
         block.add(defense);
 
+        const rerollInfo = this.add
+          .text(
+            0,
+            defense.y + defense.height + 6,
+            `Rerolls used: ${hero.rerollCount}/${HERO_BLACKSMITH_MAX_REROLLS}`,
+            {
+              ...UI_FONT.caption,
+              color: hero.rerollCount >= HERO_BLACKSMITH_MAX_REROLLS
+                ? "#ff9c9c"
+                : "#9fa6c0",
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(rerollInfo);
+
+        const locked = this.isHeroLocked(hero);
+        let blockBottom = rerollInfo.y + rerollInfo.height;
+
+        if (locked) {
+          const lockedText = this.add
+            .text(0, blockBottom + 4, "Currently locked in an adventure.", {
+              ...UI_FONT.caption,
+              color: "#ffb878",
+            })
+            .setOrigin(0, 0);
+          block.add(lockedText);
+          blockBottom = lockedText.y + lockedText.height;
+        } else if (hero.rerollCount >= HERO_BLACKSMITH_MAX_REROLLS) {
+          const limitText = this.add
+            .text(0, blockBottom + 4, "Reroll limit reached for this hero.", {
+              ...UI_FONT.caption,
+              color: "#ffb878",
+            })
+            .setOrigin(0, 0);
+          block.add(limitText);
+          blockBottom = limitText.y + limitText.height;
+        }
+
+        const buttonEnabled =
+          !locked && hero.rerollCount < HERO_BLACKSMITH_MAX_REROLLS;
+        const rerollButton = createButton(
+          this,
+          260,
+          rerollInfo.y - 4,
+          180,
+          `Reroll (${HERO_BLACKSMITH_COST}g)`,
+          () => this.rerollHeroStats(hero),
+          buttonEnabled && !this.programBusy
+        );
+        block.add(rerollButton);
+        blockBottom = Math.max(
+          blockBottom,
+          rerollButton.y + BUTTON_DIMENSIONS.height
+        );
+
         panel.add(block);
-        const blockHeight = defense.y + defense.height;
-        return offset + blockHeight + 16;
+        return offset + blockBottom + 16;
       });
     });
   }
@@ -1552,6 +2539,30 @@ export class TownScene extends Phaser.Scene {
           );
         }
 
+        // Add burn button
+        const locked = this.isHeroLocked(hero);
+        const burnButton = createButton(
+          this,
+          0,
+          blockBottom + 8,
+          140,
+          "Burn Hero",
+          () => this.burnHero(hero),
+          !locked && !this.programBusy
+        );
+        block.add(burnButton);
+        blockBottom = burnButton.y + BUTTON_DIMENSIONS.height;
+
+        if (locked) {
+          const lockedText = this.add
+            .text(160, burnButton.y + 4, "Cannot burn while adventuring", {
+              ...UI_FONT.caption,
+              color: "#ffb878",
+            })
+            .setOrigin(0, 0);
+          block.add(lockedText);
+        }
+
         panel.add(block);
         const blockHeight = blockBottom;
         return offset + blockHeight + 16;
@@ -1574,7 +2585,7 @@ export class TownScene extends Phaser.Scene {
 
       let offset = 28;
       MARKET_ITEMS.forEach((item: ItemDefinition) => {
-        const owned = this.state.inventory.items[item.id] ?? 0;
+        const owned = this.store.getInventory().items[item.id] ?? 0;
 
         panel.add(
           this.add
@@ -1600,8 +2611,7 @@ export class TownScene extends Phaser.Scene {
             110,
             `Buy (${item.buyPrice}g)`,
             () => {
-              const res = this.store.marketBuy(item.id, 1);
-              this.showToast(res.message || "");
+              this.buyItemOnChain(item.id);
             }
           )
         );
@@ -1613,8 +2623,7 @@ export class TownScene extends Phaser.Scene {
             110,
             `Sell (+${item.sellPrice}g)`,
             () => {
-              const res = this.store.marketSell(item.id, 1);
-              this.showToast(res.message || "");
+              this.sellItemOnChain(item.id);
             },
             owned > 0
           )
@@ -1649,23 +2658,92 @@ export class TownScene extends Phaser.Scene {
           .setOrigin(0, 0);
         block.add(header);
 
+        const stressLine = this.add
+          .text(
+            0,
+            header.height + 4,
+            `Stress ${hero.stress}/${hero.stressMax} • Blessed: ${hero.blessed ? "Yes" : "No"}`,
+            {
+              ...UI_FONT.caption,
+              color: hero.stress > 0 ? "#ffe28a" : "#98d1ff",
+            }
+          )
+          .setOrigin(0, 0);
+        block.add(stressLine);
+
         const virtues = hero.positiveQuirks
           .map((id) => getQuirkLabel(id))
           .join(", ");
-        const text = virtues || "No virtues recorded yet.";
-
-        const body = this.add
-          .text(0, header.height + 4, text, {
-            ...UI_FONT.caption,
-            color: virtues ? "#8de9a3" : "#9fa6c0",
-            wordWrap: { width: 432 },
-          })
+        const virtuesText = this.add
+          .text(
+            0,
+            stressLine.y + stressLine.height + 4,
+            virtues ? `Virtues: ${virtues}` : "No virtues recorded yet.",
+            {
+              ...UI_FONT.caption,
+              color: virtues ? "#8de9a3" : "#9fa6c0",
+              wordWrap: { width: 432 },
+            }
+          )
           .setOrigin(0, 0);
-        block.add(body);
+        block.add(virtuesText);
+
+        const locked = this.isHeroLocked(hero);
+
+        const relieveButton = createButton(
+          this,
+          0,
+          virtuesText.y + virtuesText.height + 8,
+          200,
+          `Relieve Stress (${HERO_ABBEY_COST}g)`,
+          () => this.relieveHeroStress(hero),
+          hero.stress > 0 && !locked && !this.programBusy
+        );
+        block.add(relieveButton);
+
+        const blessButton = createButton(
+          this,
+          220,
+          virtuesText.y + virtuesText.height + 8,
+          180,
+          `Bless (${HERO_ABBEY_COST}g)`,
+          () => this.blessHero(hero),
+          !hero.blessed && !locked && !this.programBusy
+        );
+        block.add(blessButton);
+
+        let blockBottom = Math.max(
+          relieveButton.y + BUTTON_DIMENSIONS.height,
+          blessButton.y + BUTTON_DIMENSIONS.height
+        );
+
+        if (locked) {
+          const lockedText = this.add
+            .text(
+              0,
+              blockBottom + 4,
+              "Hero must return from adventure before visiting the abbey.",
+              {
+                ...UI_FONT.caption,
+                color: "#ffb878",
+              }
+            )
+            .setOrigin(0, 0);
+          block.add(lockedText);
+          blockBottom = lockedText.y + lockedText.height;
+        } else if (hero.blessed) {
+          const blessedText = this.add
+            .text(0, blockBottom + 4, "Already blessed for the next run.", {
+              ...UI_FONT.caption,
+              color: "#98d1ff",
+            })
+            .setOrigin(0, 0);
+          block.add(blessedText);
+          blockBottom = blessedText.y + blessedText.height;
+        }
 
         panel.add(block);
-        const blockHeight = body.y + body.height;
-        return offset + blockHeight + 16;
+        return offset + blockBottom + 16;
       });
     });
   }

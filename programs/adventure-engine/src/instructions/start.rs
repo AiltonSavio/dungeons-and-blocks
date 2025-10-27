@@ -1,15 +1,14 @@
 use std::{collections::BTreeSet, mem};
 
-use crate::instructions::support::{
-    load_hero_lock, lock_hero_for_adventure, read_hero_summary, store_hero_lock,
-};
+use crate::instructions::support::{load_hero_lock, read_hero_summary, store_hero_lock};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{instruction::Instruction, program::invoke_signed};
 use dungeon_nft::state::DungeonStatus;
+use hero_core::cpi::accounts::LockCtx;
 
 use crate::errors::AdventureError;
 use crate::logic::{generate_adventure, is_floor};
-use crate::state::{DungeonPoint, HeroAdventureLock};
+use crate::state::{DungeonPoint, HeroAdventureLock, HeroSnapshot};
 use crate::{constants::*, StartAdventure};
 
 pub fn start_adventure<'info>(
@@ -78,18 +77,7 @@ pub fn start_adventure<'info>(
     );
 
     let mut hero_array = [Pubkey::default(); MAX_PARTY];
-    let mut position_array = [DungeonPoint::default(); MAX_PARTY];
-    let adventure_bump = ctx.bumps.adventure;
-    let bump_seed = [adventure_bump];
-    let player_bytes = player_key.as_ref();
-    let dungeon_bytes = dungeon_key.as_ref();
-    let adventure_signer_seeds: &[&[u8]] =
-        &[ADVENTURE_SEED, player_bytes, dungeon_bytes, &bump_seed];
-
-    let player_account_info = ctx.accounts.player.to_account_info();
-    let adventure_account_info = ctx.accounts.adventure.to_account_info();
-    let hero_core_program_info = ctx.accounts.hero_core_program.to_account_info();
-
+    let mut snapshot_array = [HeroSnapshot::default(); MAX_PARTY];
     for (idx, hero_key) in sorted_unique.iter().enumerate() {
         hero_array[idx] = *hero_key;
 
@@ -133,7 +121,6 @@ pub fn start_adventure<'info>(
 
         // Enforce & store lock state
         let mut hero_lock = load_hero_lock(&lock_account_info)?;
-        store_hero_lock(&lock_account_info, &hero_lock)?;
         require!(
             hero_lock.owner == Pubkey::default() || hero_lock.owner == player_key,
             AdventureError::HeroLockOwnerMismatch
@@ -151,15 +138,26 @@ pub fn start_adventure<'info>(
         hero_lock.last_updated = now;
         store_hero_lock(&lock_account_info, &hero_lock)?;
 
-        // CPI: lock hero in hero-core (uses adventure PDA as signer)
-        lock_hero_for_adventure(
-            &hero_core_program_info,
-            &player_account_info,
-            &hero_account_info,
-            &adventure_account_info,
-            &adventure_key,
-            adventure_signer_seeds,
-        )?;
+        // Call hero-core to lock the hero
+        let adventure_bump = ctx.accounts.adventure.bump;
+        let adventure_seeds = &[
+            ADVENTURE_SEED,
+            player_key.as_ref(),
+            dungeon_key.as_ref(),
+            &[adventure_bump],
+        ];
+        let signer_seeds = &[&adventure_seeds[..]];
+
+        let cpi_accounts = LockCtx {
+            player: ctx.accounts.player.to_account_info(),
+            hero_mint: hero_account_info,
+            adventure_signer: ctx.accounts.adventure.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.hero_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+        hero_core::cpi::lock_for_adventure(cpi_ctx, adventure_key)?;
+
+        snapshot_array[idx] = hero_summary.snapshot;
     }
 
     // Reset logic / map generation
@@ -244,12 +242,9 @@ pub fn start_adventure<'info>(
         adventure.last_exit_portal = PORTAL_NONE;
     }
 
-    for pos in position_array.iter_mut().take(sorted_unique.len()) {
-        *pos = start_point;
-    }
-
     adventure.hero_mints = hero_array;
-    adventure.hero_positions = position_array;
+    adventure.hero_snapshots = snapshot_array;
+    adventure.party_position = start_point;
     adventure.hero_count = sorted_unique.len() as u8;
     adventure.item_count = 0;
     adventure.item_mints = [Pubkey::default(); MAX_ITEMS];
@@ -259,6 +254,7 @@ pub fn start_adventure<'info>(
     adventure.last_crew = hero_array;
     adventure.last_crew_count = adventure.hero_count;
     adventure.last_crew_timestamp = now;
+    adventure.torch = 100;
 
     Ok(())
 }
