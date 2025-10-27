@@ -174,6 +174,7 @@ pub enum PendingRequestType {
     FreeMint = 1,
     PaidMint = 2,
     LevelUp = 3,
+    StatsReroll = 4,
 }
 
 #[derive(Clone, Copy)]
@@ -181,6 +182,7 @@ pub enum RequestType {
     FreeMint,
     PaidMint,
     LevelUp,
+    StatsReroll,
 }
 
 impl RequestType {
@@ -189,6 +191,7 @@ impl RequestType {
             RequestType::FreeMint => "free_mint",
             RequestType::PaidMint => "paid_mint",
             RequestType::LevelUp => "level_up",
+            RequestType::StatsReroll => "stats_reroll",
         }
     }
 }

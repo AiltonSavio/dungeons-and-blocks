@@ -20,9 +20,13 @@ pub(crate) use instructions::adventure::{
     __cpi_client_accounts_adventure_write, __cpi_client_accounts_lock_ctx,
     __cpi_client_accounts_unlock_ctx,
 };
-pub(crate) use instructions::blacksmith::__client_accounts_blacksmith_service;
+pub(crate) use instructions::blacksmith::{
+    __client_accounts_blacksmith_service, __client_accounts_callback_reroll_stats,
+};
 #[cfg(feature = "cpi")]
-pub(crate) use instructions::blacksmith::__cpi_client_accounts_blacksmith_service;
+pub(crate) use instructions::blacksmith::{
+    __cpi_client_accounts_blacksmith_service, __cpi_client_accounts_callback_reroll_stats,
+};
 pub(crate) use instructions::burn::__client_accounts_burn_hero;
 #[cfg(feature = "cpi")]
 pub(crate) use instructions::burn::__cpi_client_accounts_burn_hero;
@@ -62,7 +66,7 @@ pub(crate) use instructions::tavern::__cpi_client_accounts_tavern_service;
 pub use instructions::{
     abbey::AbbeyService,
     adventure::{AdventureWrite, LockCtx, UnlockCtx},
-    blacksmith::BlacksmithService,
+    blacksmith::{BlacksmithService, CallbackRerollStats},
     burn::BurnHero,
     devtools::HeroDevTools,
     initialize::InitializePlayer,
@@ -82,7 +86,7 @@ pub mod hero_core {
     use instructions::{
         abbey::AbbeyService,
         adventure::{AdventureWrite, LockCtx, UnlockCtx},
-        blacksmith::BlacksmithService,
+        blacksmith::{BlacksmithService, CallbackRerollStats},
         burn::BurnHero,
         devtools::HeroDevTools,
         initialize::InitializePlayer,
@@ -195,6 +199,13 @@ pub mod hero_core {
 
     pub fn reroll_stats(ctx: Context<BlacksmithService>, hero_id: u64) -> Result<()> {
         instructions::blacksmith::reroll_stats(ctx, hero_id)
+    }
+
+    pub fn callback_reroll_stats(
+        ctx: Context<CallbackRerollStats>,
+        randomness: [u8; 32],
+    ) -> Result<()> {
+        instructions::blacksmith::callback_reroll_stats(ctx, randomness)
     }
 
     pub fn relieve_stress(ctx: Context<AbbeyService>, hero_id: u64) -> Result<()> {

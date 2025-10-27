@@ -369,6 +369,12 @@ export function createRerollStatsInstruction(options: {
   const heroIdBigInt = typeof heroId === "bigint" ? heroId : BigInt(heroId);
   const [heroMint] = deriveHeroMintPda(owner, heroIdBigInt);
   const [playerEconomy] = derivePlayerEconomyPda(owner);
+  const oracleQueue = getVrfOracleAddress();
+
+  const [programIdentity] = PublicKey.findProgramAddressSync(
+    [Buffer.from("identity")],
+    HERO_CORE_PROGRAM_ID
+  );
 
   const data = instructionCoder.encode("reroll_stats", {
     hero_id: new BN(heroIdBigInt.toString()),
@@ -379,6 +385,10 @@ export function createRerollStatsInstruction(options: {
     { pubkey: heroMint, isSigner: false, isWritable: true },
     { pubkey: playerEconomy, isSigner: false, isWritable: true },
     { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: oracleQueue, isSigner: false, isWritable: true },
+    { pubkey: programIdentity, isSigner: false, isWritable: true },
+    { pubkey: VRF_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SYSVAR_SLOT_HASHES_PUBKEY, isSigner: false, isWritable: false },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
   ];
 
