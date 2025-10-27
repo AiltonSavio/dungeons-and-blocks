@@ -8,12 +8,13 @@ use hero_core::cpi::accounts::LockCtx;
 
 use crate::errors::AdventureError;
 use crate::logic::{generate_adventure, is_floor};
-use crate::state::{DungeonPoint, HeroAdventureLock, HeroSnapshot};
-use crate::{constants::*, StartAdventure};
+use crate::state::{DungeonPoint, HeroAdventureLock, HeroSnapshot, ItemSlot};
+use crate::{constants::*, ItemInput, StartAdventure};
 
 pub fn start_adventure<'info>(
     ctx: Context<'_, '_, '_, 'info, StartAdventure<'info>>,
     hero_mints: Vec<Pubkey>,
+    items: Vec<ItemInput>,
 ) -> Result<()> {
     let player_key = ctx.accounts.player.key();
     let dungeon_key = ctx.accounts.dungeon.key();
@@ -160,6 +161,82 @@ pub fn start_adventure<'info>(
         snapshot_array[idx] = hero_summary.snapshot;
     }
 
+    // Validate and process items
+    require!(
+        items.len() <= MAX_ITEMS,
+        AdventureError::TooManyItems
+    );
+
+    let mut item_array = [ItemSlot::empty(); MAX_ITEMS];
+    let mut items_count = 0u8;
+
+    // Build unique item map and validate quantities
+    for item in items.iter() {
+        require!(item.item_key < 7, AdventureError::InvalidItemKey); // 7 item types in player-economy
+        require!(item.quantity > 0, AdventureError::InvalidItemQuantity);
+
+        // Prevent bringing loot-only items to adventures
+        // PouchGold and MysteryRelic can only be found/looted, not brought
+        require!(
+            item.item_key != ITEM_POUCH_GOLD && item.item_key != ITEM_MYSTERY_RELIC,
+            AdventureError::InvalidItemKey
+        );
+
+        // Find if this item_key already exists in the array
+        let existing_slot = item_array.iter_mut().find(|slot| slot.item_key == item.item_key);
+
+        if let Some(slot) = existing_slot {
+            // Stack with existing
+            slot.quantity = slot
+                .quantity
+                .checked_add(item.quantity)
+                .ok_or(AdventureError::ItemStackOverflow)?;
+        } else {
+            // Find empty slot
+            require!(
+                (items_count as usize) < MAX_ITEMS,
+                AdventureError::TooManyItems
+            );
+            item_array[items_count as usize] = ItemSlot {
+                item_key: item.item_key,
+                quantity: item.quantity,
+            };
+            items_count += 1;
+        }
+    }
+
+    // Deduct items from player economy via CPI
+    if !items.is_empty() {
+        // Convert ItemInput to player_economy::ItemConsumption
+        let consumptions: Vec<player_economy::ItemConsumption> = items
+            .iter()
+            .map(|input| {
+                let item_key = match input.item_key {
+                    0 => player_economy::ItemKey::PouchGold,
+                    1 => player_economy::ItemKey::StressTonic,
+                    2 => player_economy::ItemKey::MinorTorch,
+                    3 => player_economy::ItemKey::HealingSalve,
+                    4 => player_economy::ItemKey::MysteryRelic,
+                    5 => player_economy::ItemKey::CalmingIncense,
+                    6 => player_economy::ItemKey::PhoenixFeather,
+                    _ => unreachable!(), // Already validated above
+                };
+                player_economy::ItemConsumption {
+                    item: item_key,
+                    quantity: input.quantity,
+                }
+            })
+            .collect();
+
+        let cpi_accounts = player_economy::cpi::accounts::ConsumeItems {
+            authority: ctx.accounts.player.to_account_info(),
+            player_economy: ctx.accounts.player_economy.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.player_economy_program.to_account_info();
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        player_economy::cpi::consume_items(cpi_ctx, consumptions)?;
+    }
+
     // Reset logic / map generation
     let should_reset = !adventure_heroes_inside
         && now.saturating_sub(adventure_last_reset) >= RESET_INTERVAL_SECONDS;
@@ -246,8 +323,8 @@ pub fn start_adventure<'info>(
     adventure.hero_snapshots = snapshot_array;
     adventure.party_position = start_point;
     adventure.hero_count = sorted_unique.len() as u8;
-    adventure.item_count = 0;
-    adventure.item_mints = [Pubkey::default(); MAX_ITEMS];
+    adventure.item_count = items_count;
+    adventure.items = item_array;
     adventure.is_active = true;
     adventure.heroes_inside = true;
     adventure.last_started_at = now;

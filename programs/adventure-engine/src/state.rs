@@ -19,7 +19,7 @@ pub struct AdventureSession {
     pub hero_snapshots: [HeroSnapshot; MAX_PARTY],
     pub party_position: DungeonPoint,
     pub item_count: u8,
-    pub item_mints: [Pubkey; MAX_ITEMS],
+    pub items: [ItemSlot; MAX_ITEMS],
     pub delegate: Option<Pubkey>,
     pub grid: Vec<u8>,
     pub rooms: Vec<DungeonRoom>,
@@ -65,7 +65,7 @@ impl AdventureSession {
             + hero_snapshot_space
             + DungeonPoint::SIZE
             + 1
-            + (32 * MAX_ITEMS)
+            + (ItemSlot::SIZE * MAX_ITEMS)
             + 33
             + 1
             + DungeonPoint::SIZE
@@ -82,6 +82,34 @@ impl AdventureSession {
             + portals_space
             + chest_state_space
             + portal_state_space
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemSlot {
+    pub item_key: u8, // ItemKey from player-economy, 255 = empty
+    pub quantity: u16,
+}
+
+impl ItemSlot {
+    pub const SIZE: usize = 1 + 2;
+    pub const EMPTY: u8 = 255;
+
+    pub fn empty() -> Self {
+        Self {
+            item_key: Self::EMPTY,
+            quantity: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.item_key == Self::EMPTY || self.quantity == 0
+    }
+}
+
+impl Default for ItemSlot {
+    fn default() -> Self {
+        Self::empty()
     }
 }
 

@@ -10,6 +10,7 @@ dependencies = [
  "dungeon-nft",
  "ephemeral-rollups-sdk",
  "hero-core",
+ "player-economy",
 ]
 
 [[package]]

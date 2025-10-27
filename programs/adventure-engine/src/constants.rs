@@ -16,3 +16,7 @@ pub const TILE_WALL: u8 = 1;
 
 pub const DEFAULT_COMMIT_FREQUENCY_MS: u32 = 500;
 pub const PORTAL_NONE: u8 = u8::MAX;
+
+// Loot-only items (can only be found/looted, not brought to adventures)
+pub const ITEM_POUCH_GOLD: u8 = 0;
+pub const ITEM_MYSTERY_RELIC: u8 = 4;

@@ -93,6 +93,7 @@ export class EmbarkScene extends Phaser.Scene {
   private heroLoadError?: string;
   private walletAddress?: string;
   private partySelection: Set<string> = new Set();
+  private selectedItems: Map<ItemId, number> = new Map();
   private myDungeons: ChainDungeon[] = [];
   private communityDungeons: ChainDungeon[] = [];
   private dungeonsLoading = false;
@@ -546,29 +547,110 @@ export class EmbarkScene extends Phaser.Scene {
     this.footer.add(suppliesCol);
 
     const suppliesTitle = this.add
-      .text(0, 0, "Supplies", UI_FONT.body)
+      .text(0, 0, "Supplies (bring to adventure)", UI_FONT.body)
       .setOrigin(0, 0);
     suppliesCol.add(suppliesTitle);
 
-    const items = Object.entries(this.store.getInventory().items) as [
+    // Filter out items that can't be brought to adventures (only found/looted)
+    const allItems = Object.entries(this.store.getInventory().items) as [
       ItemId,
       number
     ][];
-    let suppliesY = 24; // more space from title to rows
-    items.forEach(([id, qty], index) => {
-      const col = index % 2;
-      const row = Math.floor(index / 2);
+    const items = allItems.filter(([itemId]) => {
+      return itemId !== "pouch_gold" && itemId !== "mystery_relic";
+    });
+    const startY = 24; // space from title to rows
+
+    if (items.length === 0) {
       suppliesCol.add(
         this.add
-          .text(
-            col * 120,
-            suppliesY + row * 20,
-            `${id.toUpperCase()}: ${qty}`,
-            UI_FONT.caption
-          )
+          .text(0, startY, "No items in inventory", {
+            ...UI_FONT.caption,
+            color: "#9fa6c0",
+          })
           .setOrigin(0, 0)
       );
-    });
+    } else {
+      // Grid layout: 3 columns
+      const COLS = 3;
+      const COL_WIDTH = 140;
+      const ROW_HEIGHT = 44;
+
+      items.forEach(([itemId, available], index) => {
+        const col = index % COLS;
+        const row = Math.floor(index / COLS);
+        const itemX = col * COL_WIDTH;
+        const itemY = startY + row * ROW_HEIGHT;
+
+        const selected = this.getSelectedItemQuantity(itemId);
+        const itemName = itemId.replace(/_/g, " ");
+
+        // Shorten item name to fit in column
+        const displayName = itemName.length > 12
+          ? itemName.substring(0, 10) + "..."
+          : itemName;
+
+        // Item name and available quantity
+        suppliesCol.add(
+          this.add
+            .text(itemX, itemY, `${displayName} (${available})`, {
+              ...UI_FONT.caption,
+              fontSize: "10px",
+              color: "#f4f6ff",
+            })
+            .setOrigin(0, 0)
+        );
+
+        // Quantity controls
+        const controlsY = itemY + 14;
+        const controlsX = itemX;
+
+        // Minus button
+        const minusBtn = this.createTinyButton(
+          controlsX,
+          controlsY,
+          20,
+          "−",
+          () => this.setItemQuantity(itemId, selected - 1),
+          selected > 0
+        );
+        suppliesCol.add(minusBtn);
+
+        // Quantity display
+        const qtyText = this.add
+          .text(controlsX + 24, controlsY + 10, String(selected), {
+            ...UI_FONT.caption,
+            fontSize: "10px",
+            color: selected > 0 ? "#9bf0ff" : "#7d8499",
+          })
+          .setOrigin(0, 0.5);
+        suppliesCol.add(qtyText);
+
+        // Plus button
+        const plusBtn = this.createTinyButton(
+          controlsX + 38,
+          controlsY,
+          20,
+          "+",
+          () => this.setItemQuantity(itemId, selected + 1),
+          selected < available
+        );
+        suppliesCol.add(plusBtn);
+
+        // All button (select all available)
+        if (available > 1) {
+          const allBtn = this.createTinyButton(
+            controlsX + 62,
+            controlsY,
+            30,
+            "All",
+            () => this.setItemQuantity(itemId, available),
+            selected < available
+          );
+          suppliesCol.add(allBtn);
+        }
+      });
+    }
 
     const buttonY = FOOTER_HEIGHT - BUTTON_DIMENSIONS.height - 20;
     this.footerEnterBtn = this.createSmallButton(
@@ -962,6 +1044,49 @@ export class EmbarkScene extends Phaser.Scene {
     return container;
   }
 
+  private createTinyButton(
+    x: number,
+    y: number,
+    width: number,
+    label: string,
+    handler: () => void,
+    enabled = true
+  ) {
+    const container = this.add.container(x, y);
+    const height = 24;
+    const rect = this.add
+      .rectangle(
+        0,
+        0,
+        width,
+        height,
+        enabled ? PANEL_COLORS.highlight : PANEL_COLORS.disabled
+      )
+      .setOrigin(0)
+      .setStrokeStyle(1, 0x3b4254, 1);
+    container.add(rect);
+
+    container.add(
+      this.add
+        .text(width / 2, height / 2, label, {
+          ...UI_FONT.caption,
+          fontSize: "11px",
+          color: enabled ? "#f4f6ff" : "#7d8499",
+        })
+        .setOrigin(0.5)
+    );
+
+    if (enabled) {
+      rect
+        .setInteractive({ cursor: "pointer" })
+        .on("pointerover", () => rect.setFillStyle(PANEL_COLORS.hover))
+        .on("pointerout", () => rect.setFillStyle(PANEL_COLORS.highlight))
+        .on("pointerdown", handler);
+    }
+
+    return container;
+  }
+
   private updateContentScroll() {
     this.contentRoot.y =
       this.safe + this.headerHeight + 24 + 16 - this.contentScroll;
@@ -1061,6 +1186,37 @@ export class EmbarkScene extends Phaser.Scene {
       this.partySelection.add(heroId);
     }
     this.refresh();
+  }
+
+  private setItemQuantity(itemId: ItemId, quantity: number) {
+    const inventory = this.store.getInventory().items;
+    const available = inventory[itemId] || 0;
+
+    if (quantity <= 0) {
+      this.selectedItems.delete(itemId);
+    } else if (quantity <= available) {
+      this.selectedItems.set(itemId, quantity);
+    } else {
+      this.selectedItems.set(itemId, available);
+    }
+    this.refresh();
+  }
+
+  private getSelectedItemQuantity(itemId: ItemId): number {
+    return this.selectedItems.get(itemId) || 0;
+  }
+
+  private itemIdToItemKey(itemId: ItemId): number {
+    const mapping: Record<ItemId, number> = {
+      pouch_gold: 0,
+      stress_tonic: 1,
+      minor_torch: 2,
+      healing_salve: 3,
+      mystery_relic: 4,
+      calming_incense: 5,
+      phoenix_feather: 6,
+    };
+    return mapping[itemId] ?? 0;
   }
 
   private refreshFooterStates() {
@@ -1196,11 +1352,19 @@ export class EmbarkScene extends Phaser.Scene {
 
       const seed = this.normalizeSeed(selectedDungeon.dungeon.seed);
 
+      // Build supplies object from selected items
+      const selectedSupplies: Record<ItemId, number> = {};
+      this.selectedItems.forEach((quantity, itemId) => {
+        if (quantity > 0) {
+          selectedSupplies[itemId] = quantity;
+        }
+      });
+
       this.scene.stop("TownScene");
       this.scene.start("game", {
         seed,
         heroes: partyHeroes,
-        supplies: this.store.getInventory().items,
+        supplies: selectedSupplies,
         dungeon: selectedDungeon,
         adventure: existingAdventure,
         player: playerKey.toBase58(),
@@ -1267,12 +1431,24 @@ export class EmbarkScene extends Phaser.Scene {
         return;
       }
 
+      // Convert selected items to instruction format
+      const itemInputs: { item_key: number; quantity: number }[] = [];
+      this.selectedItems.forEach((quantity, itemId) => {
+        if (quantity > 0) {
+          itemInputs.push({
+            item_key: this.itemIdToItemKey(itemId),
+            quantity,
+          });
+        }
+      });
+
       // Create start adventure instruction
       const { instruction: startIx } = await createStartAdventureInstruction({
         connection,
         player: playerKey,
         dungeonMint: dungeonPubkey,
         heroMints,
+        items: itemInputs,
       });
 
       // Write the delegate pubkey into the PDA data
@@ -1328,11 +1504,19 @@ export class EmbarkScene extends Phaser.Scene {
 
       const seed = this.normalizeSeed(selectedDungeon.dungeon.seed);
 
+      // Build supplies object from selected items
+      const selectedSupplies: Record<ItemId, number> = {};
+      this.selectedItems.forEach((quantity, itemId) => {
+        if (quantity > 0) {
+          selectedSupplies[itemId] = quantity;
+        }
+      });
+
       this.scene.stop("TownScene");
       this.scene.start("game", {
         seed,
         heroes: partyHeroes,
-        supplies: this.store.getInventory().items,
+        supplies: selectedSupplies,
         dungeon: selectedDungeon,
         adventure: adventureAccount,
         player: playerKey.toBase58(),

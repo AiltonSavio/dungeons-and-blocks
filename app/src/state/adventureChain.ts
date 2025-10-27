@@ -16,6 +16,9 @@ export const ADVENTURE_ENGINE_PROGRAM_ID = new PublicKey(adventureIdl.address);
 export const HERO_CORE_PROGRAM_ID = new PublicKey(
   "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
 );
+export const PLAYER_ECONOMY_PROGRAM_ID = new PublicKey(
+  "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
+);
 export const DELEGATION_PROGRAM_ID = new PublicKey(
   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 );
@@ -30,6 +33,7 @@ const HERO_LOCK_SEED = Buffer.from("hero-lock");
 const BUFFER_SEED = Buffer.from("buffer");
 const DELEGATION_RECORD_SEED = Buffer.from("delegation");
 const DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
+const PLAYER_ECONOMY_SEED = Buffer.from("player_economy");
 
 type AdventureSessionAccount = IdlAccounts<AdventureEngine>["adventureSession"];
 
@@ -326,16 +330,23 @@ export async function createStartAdventureInstruction(options: {
   player: PublicKey;
   dungeonMint: PublicKey;
   heroMints: PublicKey[];
+  items?: { item_key: number; quantity: number }[];
 }): Promise<{
   instruction: TransactionInstruction;
   adventurePda: PublicKey;
   heroLockPdas: PublicKey[];
 }> {
-  const { connection, player, dungeonMint, heroMints } = options;
+  const { connection, player, dungeonMint, heroMints, items = [] } = options;
   const program = getAdventureProgram(connection, player);
 
   const [adventurePda] = deriveAdventurePda(player, dungeonMint);
   const heroLockPdas = heroMints.map((mint) => deriveHeroLockPda(mint)[0]);
+
+  // Derive player economy PDA
+  const [playerEconomyPda] = PublicKey.findProgramAddressSync(
+    [PLAYER_ECONOMY_SEED, player.toBuffer()],
+    PLAYER_ECONOMY_PROGRAM_ID
+  );
 
   // remaining accounts: [hero_mint, lock_pda] * N
   const remainingAccounts = heroMints.flatMap((mint, index) => {
@@ -347,13 +358,15 @@ export async function createStartAdventureInstruction(options: {
   });
 
   const instruction = await program.methods
-    .startAdventure(heroMints)
+    .startAdventure(heroMints, items)
     .accountsPartial({
       player,
       dungeon: dungeonMint,
       adventure: adventurePda,
+      playerEconomy: playerEconomyPda,
       systemProgram: SystemProgram.programId,
       heroProgram: HERO_CORE_PROGRAM_ID,
+      playerEconomyProgram: PLAYER_ECONOMY_PROGRAM_ID,
     })
     .remainingAccounts(remainingAccounts)
     .instruction();

@@ -40,4 +40,18 @@ pub enum AdventureError {
     InvalidValidatorAccount,
     #[msg("caller is not authorized to perform this action")]
     Unauthorized,
+    #[msg("too many items provided (max 6)")]
+    TooManyItems,
+    #[msg("invalid item key")]
+    InvalidItemKey,
+    #[msg("invalid item quantity")]
+    InvalidItemQuantity,
+    #[msg("item stack overflow")]
+    ItemStackOverflow,
+    #[msg("inventory is full")]
+    InventoryFull,
+    #[msg("item not found in inventory")]
+    ItemNotFound,
+    #[msg("insufficient item quantity")]
+    InsufficientItemQuantity,
 }

@@ -11,6 +11,7 @@ anchor-lang = "0.31.1"
 ephemeral-rollups-sdk = { version = "0.2.12", features = ["anchor"] }
 dungeon-nft = { path = "../dungeon-nft", features = ["no-entrypoint"] }
 hero-core = { path = "../hero-core", features = ["no-entrypoint", "cpi"] }
+player-economy = { path = "../player-economy", features = ["no-entrypoint", "cpi"] }
 
 [features]
 default = []
