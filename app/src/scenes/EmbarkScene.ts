@@ -16,7 +16,6 @@ import {
   fetchOwnedDungeonAccounts,
 } from "../state/dungeonChain";
 import {
-  createDelegateAdventureInstruction,
   createStartAdventureInstruction,
   fetchAdventureSession,
   fetchAdventureSessionSmart,
@@ -31,7 +30,6 @@ import {
   BUTTON_DIMENSIONS,
   snap,
 } from "../ui/uiConfig";
-import { setInventoryVisible } from "../ui/hudControls";
 import {
   deriveTempKeypair,
   ensureTempKeypairFunded,
@@ -102,7 +100,6 @@ export class EmbarkScene extends Phaser.Scene {
   private embarkBusy = false;
   private walletProvider?: SolanaProvider;
   private solanaConnection?: Connection;
-  private ephemeralConnection?: Connection;
 
   private safe = SAFE_MARGIN;
   private contentWidth = 0;
@@ -151,9 +148,6 @@ export class EmbarkScene extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor(0x12151d);
     this.releaseKeyboardBindings();
-    const hideInventory = () => setInventoryVisible(false);
-    hideInventory();
-    this.events.on(Phaser.Scenes.Events.RESUME, hideInventory);
     this.registry.events.on(
       "setdata-town:heroRoster",
       this.onRosterDataEvent,
@@ -165,7 +159,6 @@ export class EmbarkScene extends Phaser.Scene {
       this
     );
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.events.off(Phaser.Scenes.Events.RESUME, hideInventory);
       this.registry.events.off(
         "setdata-town:heroRoster",
         this.onRosterDataEvent,
@@ -586,9 +579,8 @@ export class EmbarkScene extends Phaser.Scene {
         const itemName = itemId.replace(/_/g, " ");
 
         // Shorten item name to fit in column
-        const displayName = itemName.length > 12
-          ? itemName.substring(0, 10) + "..."
-          : itemName;
+        const displayName =
+          itemName.length > 12 ? itemName.substring(0, 10) + "..." : itemName;
 
         // Item name and available quantity
         suppliesCol.add(
@@ -1279,8 +1271,7 @@ export class EmbarkScene extends Phaser.Scene {
     }
 
     const connection = this.getSolanaConnection();
-    const ephemeralConnection = this.getEphemeralConnection();
-    if (!connection || !ephemeralConnection) {
+    if (!connection) {
       this.store.toast("RPC unavailable.");
       return;
     }
@@ -1299,14 +1290,14 @@ export class EmbarkScene extends Phaser.Scene {
     }
 
     // Check if adventure already exists and is active
-    // Use smart fetch to get from ephemeral if delegated, base layer if not
+    // Fetch from the main chain while MagicBlock integration is disabled
     const [adventurePda] = deriveAdventurePda(playerKey, dungeonPubkey);
     let existingAdventure: any = null;
 
     try {
       existingAdventure = await fetchAdventureSessionSmart(
         connection,
-        ephemeralConnection,
+        null,
         adventurePda
       );
     } catch (err) {
@@ -1328,6 +1319,25 @@ export class EmbarkScene extends Phaser.Scene {
       existingAdventure.isActive &&
       existingAdventure.heroesInside
     ) {
+      const tempKeypair = deriveTempKeypair(playerKey);
+
+      const fundSuccess = await this.fundTempKeypairForPlayer(playerKey);
+      if (!fundSuccess) {
+        this.store.toast(
+          "Failed to prepare movement keypair. Please try again."
+        );
+        return;
+      }
+
+      await this.ensureAdventureDelegate(
+        connection,
+        playerKey,
+        adventurePda,
+        tempKeypair.publicKey,
+        existingAdventure.delegate
+      );
+      existingAdventure.delegate = tempKeypair.publicKey.toBase58();
+
       const partyHeroes: PartyHeroSnapshot[] = [];
       const byAccount = new Map(this.chainHeroes.map((h) => [h.account, h]));
 
@@ -1341,30 +1351,15 @@ export class EmbarkScene extends Phaser.Scene {
         });
       }
 
-      // Fund temp keypair before entering the game
-      const fundSuccess = await this.fundTempKeypairForPlayer(playerKey);
-      if (!fundSuccess) {
-        this.store.toast(
-          "Failed to prepare movement keypair. Please try again."
-        );
-        return;
-      }
-
       const seed = this.normalizeSeed(selectedDungeon.dungeon.seed);
 
       // Build supplies object from selected items
-      const selectedSupplies: Record<ItemId, number> = {};
-      this.selectedItems.forEach((quantity, itemId) => {
-        if (quantity > 0) {
-          selectedSupplies[itemId] = quantity;
-        }
-      });
 
       this.scene.stop("TownScene");
       this.scene.start("game", {
         seed,
         heroes: partyHeroes,
-        supplies: selectedSupplies,
+        supplies: existingAdventure.items ?? [],
         dungeon: selectedDungeon,
         adventure: existingAdventure,
         player: playerKey.toBase58(),
@@ -1412,7 +1407,7 @@ export class EmbarkScene extends Phaser.Scene {
     this.refreshFooterStates();
 
     try {
-      // Derive temp keypair for ephemeral signing
+      // Derive temp keypair for delegated authority
       const tempKeypair = deriveTempKeypair(playerKey);
       console.log(
         "[EmbarkScene] Temp keypair:",
@@ -1461,28 +1456,13 @@ export class EmbarkScene extends Phaser.Scene {
         }
       );
 
-      // Delegate the PDA to the ephemeral rollup
-      const { instruction: delegateIx } =
-        await createDelegateAdventureInstruction({
-          connection,
-          payer: playerKey,
-          adventurePda,
-          owner: playerKey,
-          dungeonMint: dungeonPubkey,
-        });
-
       const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
         units: 800_000,
       });
 
-      // Send all instructions in one transaction
-      console.log("[EmbarkScene] Creating adventure and delegating to ER...");
-      await this.sendProgramTransaction([
-        computeIx,
-        startIx,
-        setDelegateIx,
-        delegateIx,
-      ]);
+      // Transaction: Create adventure on main chain and set delegate
+      console.log("[EmbarkScene] Creating adventure on main chain...");
+      await this.sendProgramTransaction([computeIx, startIx, setDelegateIx]);
 
       // Fetch the created adventure from base layer
       console.log("[EmbarkScene] Fetching adventure account...");
@@ -1499,24 +1479,17 @@ export class EmbarkScene extends Phaser.Scene {
         "[EmbarkScene] Adventure created successfully, delegate:",
         adventureAccount.delegate
       );
+      adventureAccount.delegate = tempKeypair.publicKey.toBase58();
 
       this.store.consumeBlessings(partyIds);
 
       const seed = this.normalizeSeed(selectedDungeon.dungeon.seed);
 
-      // Build supplies object from selected items
-      const selectedSupplies: Record<ItemId, number> = {};
-      this.selectedItems.forEach((quantity, itemId) => {
-        if (quantity > 0) {
-          selectedSupplies[itemId] = quantity;
-        }
-      });
-
       this.scene.stop("TownScene");
       this.scene.start("game", {
         seed,
         heroes: partyHeroes,
-        supplies: selectedSupplies,
+        supplies: adventureAccount.items ?? [],
         dungeon: selectedDungeon,
         adventure: adventureAccount,
         player: playerKey.toBase58(),
@@ -1529,10 +1502,39 @@ export class EmbarkScene extends Phaser.Scene {
     }
   }
 
+  private async ensureAdventureDelegate(
+    connection: Connection,
+    playerKey: PublicKey,
+    adventurePda: PublicKey,
+    delegate: PublicKey,
+    currentDelegate?: string | null
+  ): Promise<void> {
+    const expectedDelegate = delegate.toBase58();
+    if (currentDelegate === expectedDelegate) {
+      return;
+    }
+
+    try {
+      const { instruction } = await createSetDelegateInstruction({
+        connection,
+        payer: playerKey,
+        adventurePda,
+        delegate,
+      });
+      await this.sendProgramTransaction([instruction]);
+      console.log(
+        "[EmbarkScene] Adventure delegate updated to",
+        expectedDelegate
+      );
+    } catch (err) {
+      console.error("[EmbarkScene] Failed to set adventure delegate:", err);
+      throw err;
+    }
+  }
+
   private async fundTempKeypairForPlayer(
     playerKey: PublicKey
   ): Promise<boolean> {
-    // Use BASE layer connection for funding (where player has SOL)
     const connection = this.getSolanaConnection();
     const provider = this.getWalletProvider();
     if (!connection || !provider) {
@@ -1693,25 +1695,6 @@ export class EmbarkScene extends Phaser.Scene {
       this.solanaConnection = new Connection(endpoint, "confirmed");
     }
     return this.solanaConnection;
-  }
-
-  private getEphemeralConnection(): Connection | undefined {
-    if (typeof window === "undefined") return undefined;
-    if (!this.ephemeralConnection) {
-      const env =
-        (
-          import.meta as unknown as {
-            env?: Record<string, string | undefined>;
-          }
-        ).env ?? {};
-      const endpoint =
-        env.VITE_MAGICBLOCK_RPC_URL ??
-        (window as unknown as { __DNB_MAGICBLOCK_RPC__?: string })
-          .__DNB_MAGICBLOCK_RPC__ ??
-        "https://devnet.magicblock.app";
-      this.ephemeralConnection = new Connection(endpoint, "confirmed");
-    }
-    return this.ephemeralConnection;
   }
 
   private async sendProgramTransaction(

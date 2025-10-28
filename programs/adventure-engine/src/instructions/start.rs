@@ -22,6 +22,7 @@ pub fn start_adventure<'info>(
     let dungeon_grid_width = ctx.accounts.dungeon.grid_width;
     let dungeon_grid_height = ctx.accounts.dungeon.grid_height;
     let dungeon_status = ctx.accounts.dungeon.status;
+
     let adventure_key = ctx.accounts.adventure.key();
     let adventure_player = ctx.accounts.adventure.player;
     let adventure_dungeon_mint = ctx.accounts.adventure.dungeon_mint;
@@ -62,6 +63,20 @@ pub fn start_adventure<'info>(
         AdventureError::AdventureAlreadyActive
     );
 
+    if is_new {
+        // Limit the mutable borrow to this block so we can borrow again later.
+        {
+            let adventure = &mut ctx.accounts.adventure;
+            adventure.player = player_key;
+            adventure.dungeon_mint = dungeon_key;
+            adventure.bump = ctx.bumps.adventure;
+            adventure.created_at = now;
+            adventure.last_reset_at = now;
+            adventure.delegate = None;
+        }
+    }
+    let adventure_bump = ctx.bumps.adventure;
+
     // Sorted & unique hero list (enforce no dups)
     let mut sorted_unique: Vec<Pubkey> = hero_mints.clone();
     sorted_unique.sort();
@@ -70,7 +85,6 @@ pub fn start_adventure<'info>(
         require!(set.insert(*key), AdventureError::DuplicateHero);
     }
 
-    // Expect pairs: [hero_account, hero_lock_pda] * N
     let expected_accounts = sorted_unique.len() * 2;
     require!(
         ctx.remaining_accounts.len() == expected_accounts,
@@ -79,6 +93,7 @@ pub fn start_adventure<'info>(
 
     let mut hero_array = [Pubkey::default(); MAX_PARTY];
     let mut snapshot_array = [HeroSnapshot::default(); MAX_PARTY];
+
     for (idx, hero_key) in sorted_unique.iter().enumerate() {
         hero_array[idx] = *hero_key;
 
@@ -101,15 +116,26 @@ pub fn start_adventure<'info>(
             AdventureError::InvalidHeroLockAccount
         );
 
-        // Inline init of the lock PDA if missing
-        if lock_account_info.data_len() == 0 {
+        // Inline init of the lock PDA if missing or wrong size
+        let needs_init = lock_account_info.data_len() == 0
+            || lock_account_info.data_len() != HeroAdventureLock::LEN;
+
+        if needs_init {
+            // Close old account if it exists with wrong size
+            if lock_account_info.data_len() > 0 && lock_account_info.data_len() != HeroAdventureLock::LEN {
+                let dest = ctx.accounts.player.to_account_info();
+                let lock_lamports = lock_account_info.lamports();
+                **dest.lamports.borrow_mut() = dest.lamports().checked_add(lock_lamports).unwrap();
+                **lock_account_info.lamports.borrow_mut() = 0;
+            }
+
             let rent = Rent::get()?.minimum_balance(HeroAdventureLock::LEN);
             let create_ix = build_create_account_instruction(
-                ctx.accounts.player.key,
+                &ctx.accounts.player.key(),
                 lock_account_info.key,
                 rent,
                 HeroAdventureLock::LEN as u64,
-                ctx.program_id,
+                &ctx.program_id,
             );
             let signer_seeds: &[&[&[u8]]] = &[&[HERO_LOCK_SEED, hero_key.as_ref(), &[lock_bump]]];
             let accounts = [
@@ -139,8 +165,6 @@ pub fn start_adventure<'info>(
         hero_lock.last_updated = now;
         store_hero_lock(&lock_account_info, &hero_lock)?;
 
-        // Call hero-core to lock the hero
-        let adventure_bump = ctx.accounts.adventure.bump;
         let adventure_seeds = &[
             ADVENTURE_SEED,
             player_key.as_ref(),
@@ -162,10 +186,7 @@ pub fn start_adventure<'info>(
     }
 
     // Validate and process items
-    require!(
-        items.len() <= MAX_ITEMS,
-        AdventureError::TooManyItems
-    );
+    require!(items.len() <= MAX_ITEMS, AdventureError::TooManyItems);
 
     let mut item_array = [ItemSlot::empty(); MAX_ITEMS];
     let mut items_count = 0u8;
@@ -176,23 +197,20 @@ pub fn start_adventure<'info>(
         require!(item.quantity > 0, AdventureError::InvalidItemQuantity);
 
         // Prevent bringing loot-only items to adventures
-        // PouchGold and MysteryRelic can only be found/looted, not brought
         require!(
             item.item_key != ITEM_POUCH_GOLD && item.item_key != ITEM_MYSTERY_RELIC,
             AdventureError::InvalidItemKey
         );
 
-        // Find if this item_key already exists in the array
-        let existing_slot = item_array.iter_mut().find(|slot| slot.item_key == item.item_key);
-
-        if let Some(slot) = existing_slot {
-            // Stack with existing
+        if let Some(slot) = item_array
+            .iter_mut()
+            .find(|slot| slot.item_key == item.item_key)
+        {
             slot.quantity = slot
                 .quantity
                 .checked_add(item.quantity)
                 .ok_or(AdventureError::ItemStackOverflow)?;
         } else {
-            // Find empty slot
             require!(
                 (items_count as usize) < MAX_ITEMS,
                 AdventureError::TooManyItems
@@ -207,7 +225,6 @@ pub fn start_adventure<'info>(
 
     // Deduct items from player economy via CPI
     if !items.is_empty() {
-        // Convert ItemInput to player_economy::ItemConsumption
         let consumptions: Vec<player_economy::ItemConsumption> = items
             .iter()
             .map(|input| {
@@ -219,7 +236,7 @@ pub fn start_adventure<'info>(
                     4 => player_economy::ItemKey::MysteryRelic,
                     5 => player_economy::ItemKey::CalmingIncense,
                     6 => player_economy::ItemKey::PhoenixFeather,
-                    _ => unreachable!(), // Already validated above
+                    _ => unreachable!(),
                 };
                 player_economy::ItemConsumption {
                     item: item_key,
@@ -241,97 +258,91 @@ pub fn start_adventure<'info>(
     let should_reset = !adventure_heroes_inside
         && now.saturating_sub(adventure_last_reset) >= RESET_INTERVAL_SECONDS;
 
-    let adventure = &mut ctx.accounts.adventure;
+    // Re-borrow adventure mutably to write fields
+    {
+        let adventure = &mut ctx.accounts.adventure;
 
-    if is_new {
-        adventure.player = player_key;
-        adventure.dungeon_mint = dungeon_key;
-        adventure.bump = ctx.bumps.adventure;
-        adventure.created_at = now;
-        adventure.last_reset_at = now;
-        adventure.delegate = None;
-    }
+        let generated = generate_adventure(dungeon_seed, dungeon_grid_width, dungeon_grid_height);
 
-    let generated = generate_adventure(dungeon_seed, dungeon_grid_width, dungeon_grid_height);
+        let previous_opened = mem::take(&mut adventure.opened_chests);
+        let previous_used = mem::take(&mut adventure.used_portals);
 
-    let previous_opened = mem::take(&mut adventure.opened_chests);
-    let previous_used = mem::take(&mut adventure.used_portals);
+        adventure.grid = generated.grid;
+        adventure.rooms = generated.rooms;
+        adventure.doors = generated.doors;
+        adventure.chests = generated.chests;
+        adventure.portals = generated.portals;
 
-    adventure.grid = generated.grid;
-    adventure.rooms = generated.rooms;
-    adventure.doors = generated.doors;
-    adventure.chests = generated.chests;
-    adventure.portals = generated.portals;
+        let chests_len = adventure.chests.len();
+        let portals_len = adventure.portals.len();
+        adventure.opened_chests = previous_opened;
+        ensure_u8_vector_length(&mut adventure.opened_chests, chests_len);
+        adventure.used_portals = previous_used;
+        ensure_u8_vector_length(&mut adventure.used_portals, portals_len);
 
-    let chests_len = adventure.chests.len();
-    let portals_len = adventure.portals.len();
-    adventure.opened_chests = previous_opened;
-    ensure_u8_vector_length(&mut adventure.opened_chests, chests_len);
-    adventure.used_portals = previous_used;
-    ensure_u8_vector_length(&mut adventure.used_portals, portals_len);
+        adventure.seed = dungeon_seed;
+        adventure.width = dungeon_grid_width;
+        adventure.height = dungeon_grid_height;
 
-    adventure.seed = dungeon_seed;
-    adventure.width = dungeon_grid_width;
-    adventure.height = dungeon_grid_height;
+        if should_reset {
+            adventure.opened_chests.fill(0);
+            adventure.used_portals.fill(0);
+            adventure.last_exit_portal = PORTAL_NONE;
+            adventure.last_exit_position = adventure
+                .rooms
+                .first()
+                .map(|room| room.center())
+                .unwrap_or(DungeonPoint { x: 1, y: 1 });
+            adventure.last_reset_at = now;
+        } else if adventure_last_exit_portal as usize >= adventure.portals.len() {
+            adventure.last_exit_portal = PORTAL_NONE;
+        }
 
-    if should_reset {
-        adventure.opened_chests.fill(0);
-        adventure.used_portals.fill(0);
-        adventure.last_exit_portal = PORTAL_NONE;
-        adventure.last_exit_position = adventure
+        let same_party = adventure_last_crew_count as usize == sorted_unique.len()
+            && adventure_last_crew[..sorted_unique.len()] == hero_array[..sorted_unique.len()]
+            && now.saturating_sub(adventure_last_crew_timestamp) <= CREW_EXPIRY_SECONDS
+            && adventure_last_exit_portal != PORTAL_NONE;
+
+        let fallback_point = adventure
             .rooms
             .first()
             .map(|room| room.center())
             .unwrap_or(DungeonPoint { x: 1, y: 1 });
-        adventure.last_reset_at = now;
-    } else if adventure.last_exit_portal as usize >= adventure.portals.len() {
-        adventure.last_exit_portal = PORTAL_NONE;
+
+        let start_point = if same_party {
+            adventure_last_exit_position
+        } else {
+            fallback_point
+        };
+
+        if !same_party {
+            adventure.last_exit_portal = PORTAL_NONE;
+            adventure.last_exit_position = fallback_point;
+        }
+
+        if !is_floor(
+            &adventure.grid,
+            adventure.width,
+            start_point.x,
+            start_point.y,
+        ) {
+            adventure.last_exit_portal = PORTAL_NONE;
+        }
+
+        adventure.hero_mints = hero_array;
+        adventure.hero_snapshots = snapshot_array;
+        adventure.party_position = start_point;
+        adventure.hero_count = sorted_unique.len() as u8;
+        adventure.item_count = items_count;
+        adventure.items = item_array;
+        adventure.is_active = true;
+        adventure.heroes_inside = true;
+        adventure.last_started_at = now;
+        adventure.last_crew = hero_array;
+        adventure.last_crew_count = adventure.hero_count;
+        adventure.last_crew_timestamp = now;
+        adventure.torch = 100;
     }
-
-    let same_party = adventure_last_crew_count as usize == sorted_unique.len()
-        && adventure_last_crew[..sorted_unique.len()] == hero_array[..sorted_unique.len()]
-        && now.saturating_sub(adventure_last_crew_timestamp) <= CREW_EXPIRY_SECONDS
-        && adventure_last_exit_portal != PORTAL_NONE;
-
-    let fallback_point = adventure
-        .rooms
-        .first()
-        .map(|room| room.center())
-        .unwrap_or(DungeonPoint { x: 1, y: 1 });
-
-    let start_point = if same_party {
-        adventure_last_exit_position
-    } else {
-        fallback_point
-    };
-
-    if !same_party {
-        adventure.last_exit_portal = PORTAL_NONE;
-        adventure.last_exit_position = fallback_point;
-    }
-
-    if !is_floor(
-        &adventure.grid,
-        adventure.width,
-        start_point.x,
-        start_point.y,
-    ) {
-        adventure.last_exit_portal = PORTAL_NONE;
-    }
-
-    adventure.hero_mints = hero_array;
-    adventure.hero_snapshots = snapshot_array;
-    adventure.party_position = start_point;
-    adventure.hero_count = sorted_unique.len() as u8;
-    adventure.item_count = items_count;
-    adventure.items = item_array;
-    adventure.is_active = true;
-    adventure.heroes_inside = true;
-    adventure.last_started_at = now;
-    adventure.last_crew = hero_array;
-    adventure.last_crew_count = adventure.hero_count;
-    adventure.last_crew_timestamp = now;
-    adventure.torch = 100;
 
     Ok(())
 }

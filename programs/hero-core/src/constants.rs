@@ -29,7 +29,7 @@ pub const TAVERN_HEAL_COST_PER_HP: u64 = 1;
 pub const LEVEL_UP_GOLD_COST: u64 = 50;
 
 pub fn adventure_engine_program_id() -> Pubkey {
-    Pubkey::from_str("9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt")
+    Pubkey::from_str("Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC")
         .expect("valid adventure engine program id")
 }
 

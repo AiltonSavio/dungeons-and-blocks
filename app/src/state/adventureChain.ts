@@ -1,4 +1,8 @@
-import { AnchorProvider, Program } from "@coral-xyz/anchor";
+import {
+  BorshInstructionCoder,
+  AnchorProvider,
+  Program,
+} from "@coral-xyz/anchor";
 import type { IdlAccounts } from "@coral-xyz/anchor";
 import {
   Connection,
@@ -14,26 +18,30 @@ export { TRAIT_NONE } from "./traitCatalog";
 
 export const ADVENTURE_ENGINE_PROGRAM_ID = new PublicKey(adventureIdl.address);
 export const HERO_CORE_PROGRAM_ID = new PublicKey(
-  "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
+  "B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E"
 );
 export const PLAYER_ECONOMY_PROGRAM_ID = new PublicKey(
-  "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
+  "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
 );
-export const DELEGATION_PROGRAM_ID = new PublicKey(
-  "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-);
-export const MAGIC_PROGRAM_ID = new PublicKey(
-  "Magic11111111111111111111111111111111111111"
-);
-export const MAGIC_CONTEXT_ID = new PublicKey(
-  "MagicContext1111111111111111111111111111111"
-);
+// MagicBlock delegation endpoints retained for future reactivation.
+// export const DELEGATION_PROGRAM_ID = new PublicKey(
+//   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+// );
+// export const MAGIC_PROGRAM_ID = new PublicKey(
+//   "Magic11111111111111111111111111111111111111"
+// );
+// export const MAGIC_CONTEXT_ID = new PublicKey(
+//   "MagicContext1111111111111111111111111111111"
+// );
 const ADVENTURE_SEED = Buffer.from("adventure");
 const HERO_LOCK_SEED = Buffer.from("hero-lock");
 const BUFFER_SEED = Buffer.from("buffer");
 const DELEGATION_RECORD_SEED = Buffer.from("delegation");
 const DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
 const PLAYER_ECONOMY_SEED = Buffer.from("player_economy");
+
+// Create instruction coder
+const instructionCoder = new BorshInstructionCoder(adventureIdl as any);
 
 type AdventureSessionAccount = IdlAccounts<AdventureEngine>["adventureSession"];
 
@@ -42,16 +50,18 @@ export type ChainAdventure = {
   player: string;
   dungeonMint: string;
   bump: number;
+  seed: number;
+  width: number;
+  height: number;
   isActive: boolean;
   heroesInside: boolean;
   heroCount: number;
   heroMints: string[];
   heroSnapshots: ChainHeroSnapshot[];
   partyPosition: { x: number; y: number };
+  itemCount: number;
+  items: ItemSlot[];
   delegate: string | null;
-  width: number;
-  height: number;
-  seed: number;
   grid: number[];
   rooms: { x: number; y: number; w: number; h: number }[];
   doors: { x: number; y: number }[];
@@ -63,7 +73,16 @@ export type ChainAdventure = {
   lastExitPosition: { x: number; y: number };
   createdAt: number;
   lastStartedAt: number;
+  lastResetAt: number;
+  lastCrewTimestamp: number;
+  lastCrewCount: number;
+  lastCrew: string[];
   torch: number;
+};
+
+export type ItemSlot = {
+  itemKey: number;
+  quantity: number;
 };
 
 export type ChainHeroSnapshot = {
@@ -143,23 +162,23 @@ export function deriveAdventureBufferPda(
   );
 }
 
-export function deriveDelegationRecordPda(
-  adventure: PublicKey
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [DELEGATION_RECORD_SEED, adventure.toBuffer()],
-    DELEGATION_PROGRAM_ID
-  );
-}
+// export function deriveDelegationRecordPda(
+//   adventure: PublicKey
+// ): [PublicKey, number] {
+//   return PublicKey.findProgramAddressSync(
+//     [DELEGATION_RECORD_SEED, adventure.toBuffer()],
+//     DELEGATION_PROGRAM_ID
+//   );
+// }
 
-export function deriveDelegationMetadataPda(
-  adventure: PublicKey
-): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [DELEGATION_METADATA_SEED, adventure.toBuffer()],
-    DELEGATION_PROGRAM_ID
-  );
-}
+// export function deriveDelegationMetadataPda(
+//   adventure: PublicKey
+// ): [PublicKey, number] {
+//   return PublicKey.findProgramAddressSync(
+//     [DELEGATION_METADATA_SEED, adventure.toBuffer()],
+//     DELEGATION_PROGRAM_ID
+//   );
+// }
 
 // ---------- Fetch & mapping ----------
 
@@ -175,64 +194,31 @@ export async function fetchAdventureSession(
   return mapAdventureAccount(adventurePda, account);
 }
 
-/**
- * Check if an adventure account is delegated to ephemeral rollup
- * Delegated accounts have a different owner than the adventure program
- */
-export async function isAdventureDelegated(
-  connection: Connection,
-  adventurePda: PublicKey
-): Promise<boolean> {
-  try {
-    const accountInfo = await connection.getAccountInfo(adventurePda);
-    if (!accountInfo) return false;
+// export async function isAdventureDelegated(
+//   connection: Connection,
+//   adventurePda: PublicKey
+// ): Promise<boolean> {
+//   try {
+//     const accountInfo = await connection.getAccountInfo(adventurePda);
+//     if (!accountInfo) return false;
+//
+//     // If delegated, the owner will be the delegation program, not the adventure program
+//     return !accountInfo.owner.equals(ADVENTURE_ENGINE_PROGRAM_ID);
+//   } catch (err) {
+//     console.error("[adventureChain] Failed to check delegation status:", err);
+//     return false;
+//   }
+// }
 
-    // If delegated, the owner will be the delegation program, not the adventure program
-    return !accountInfo.owner.equals(ADVENTURE_ENGINE_PROGRAM_ID);
-  } catch (err) {
-    console.error("[adventureChain] Failed to check delegation status:", err);
-    return false;
-  }
-}
-
-/**
- * Fetch adventure session from the correct connection (ephemeral if delegated, base layer if not)
- */
+/** Fetch adventure session directly from the base layer (MagicBlock disabled). */
 export async function fetchAdventureSessionSmart(
   baseConnection: Connection,
-  ephemeralConnection: Connection,
+  _ephemeralConnection: Connection | null,
   adventurePda: PublicKey
 ): Promise<ChainAdventure | null> {
   try {
-    // First check on base layer if it exists and is delegated
-    const isDelegated = await isAdventureDelegated(
-      baseConnection,
-      adventurePda
-    );
-
-    if (isDelegated) {
-      console.log(
-        "[adventureChain] Adventure is delegated, fetching from ephemeral"
-      );
-
-      // Trigger lazy reload on ephemeral by attempting an airdrop
-      // This ensures the ephemeral rollup has loaded the latest state
-      try {
-        await ephemeralConnection.requestAirdrop(adventurePda, 1);
-      } catch (_) {
-        // Expected to fail, but triggers state refresh
-        console.log("[adventureChain] Triggered ephemeral state refresh");
-      }
-
-      // Fetch from ephemeral connection
-      return fetchAdventureSession(ephemeralConnection, adventurePda);
-    } else {
-      console.log(
-        "[adventureChain] Adventure is not delegated, fetching from base layer"
-      );
-      // Fetch from base layer
-      return fetchAdventureSession(baseConnection, adventurePda);
-    }
+    // MagicBlock delegation disabled: always read from base layer.
+    return fetchAdventureSession(baseConnection, adventurePda);
   } catch (err) {
     console.error("[adventureChain] Failed to fetch adventure:", err);
     return null;
@@ -245,86 +231,135 @@ export function mapAdventureAccount(
 ): ChainAdventure {
   const width = Number(account.width);
   const height = Number(account.height);
-  const readTraitSlots = (slots: readonly number[] | Uint8Array | undefined) => {
+
+  const readTraitSlots = (
+    slots: readonly number[] | Uint8Array | undefined
+  ): number[] => {
     const values = Array.from(slots ?? []);
     while (values.length < 3) values.push(TRAIT_NONE);
     return values.map((value) => Number(value));
   };
-  const heroSnapshots = account.heroSnapshots.map((snapshot) => ({
-    heroId: Number(snapshot.heroId),
-    heroType: Number(snapshot.heroType),
-    level: Number(snapshot.level),
-    experience: Number(snapshot.experience),
-    maxHp: Number(snapshot.maxHp),
-    currentHp: Number(snapshot.currentHp),
-    attack: Number(snapshot.attack),
-    defense: Number(snapshot.defense),
-    magic: Number(snapshot.magic),
-    resistance: Number(snapshot.resistance),
-    speed: Number(snapshot.speed),
-    luck: Number(snapshot.luck),
-    statusEffects: Number(snapshot.statusEffects),
-    stress: Number(snapshot.stress),
-    stressMax: Number(snapshot.stressMax),
-    positiveTraits: readTraitSlots(snapshot.positiveTraits),
-    negativeTraits: readTraitSlots(snapshot.negativeTraits),
-  }));
+
+  const heroSnapshots: ChainHeroSnapshot[] = account.heroSnapshots.map(
+    (snapshot) => ({
+      heroId: Number(snapshot.heroId),
+      heroType: Number(snapshot.heroType),
+      level: Number(snapshot.level),
+      experience: Number(snapshot.experience),
+      maxHp: Number(snapshot.maxHp),
+      currentHp: Number(snapshot.currentHp),
+      attack: Number(snapshot.attack),
+      defense: Number(snapshot.defense),
+      magic: Number(snapshot.magic),
+      resistance: Number(snapshot.resistance),
+      speed: Number(snapshot.speed),
+      luck: Number(snapshot.luck),
+      statusEffects: Number(snapshot.statusEffects),
+      stress: Number(snapshot.stress),
+      stressMax: Number(snapshot.stressMax),
+      positiveTraits: readTraitSlots(snapshot.positiveTraits),
+      negativeTraits: readTraitSlots(snapshot.negativeTraits),
+    })
+  );
+
   const rooms = account.rooms.map((room) => ({
     x: Number(room.x),
     y: Number(room.y),
     w: Number(room.w),
     h: Number(room.h),
   }));
+
   const doors = account.doors.map((door) => ({
     x: Number(door.x),
     y: Number(door.y),
   }));
+
   const chests = account.chests.map((chest) => ({
     x: Number(chest.x),
     y: Number(chest.y),
   }));
+
   const portals = account.portals.map((portal) => ({
     x: Number(portal.x),
     y: Number(portal.y),
   }));
 
+  // Map items (NEW)
+  const items: ItemSlot[] = account.items.map((item) => ({
+    itemKey: Number(item.itemKey),
+    quantity: Number(item.quantity),
+  }));
+
+  const openedChests = Array.from(account.openedChests).map(Number);
+  const usedPortals = Array.from(account.usedPortals).map(Number);
+
+  const lastExitPosition = {
+    x: Number(account.lastExitPosition.x),
+    y: Number(account.lastExitPosition.y),
+  };
+
+  const partyPosition = {
+    x: Number(account.partyPosition.x),
+    y: Number(account.partyPosition.y),
+  };
+
+  // Map lastCrew (NEW)
+  const lastCrew = account.lastCrew.map((key) => key.toBase58());
+
   return {
     publicKey: pubkey.toBase58(),
     player: account.player.toBase58(),
     dungeonMint: account.dungeonMint.toBase58(),
-    bump: account.bump,
-    isActive: account.isActive,
-    heroesInside: account.heroesInside,
-    heroCount: Number(account.heroCount),
-    heroMints: account.heroMints.map((mint) => mint.toBase58()),
-    heroSnapshots,
-    partyPosition: {
-      x: Number(account.partyPosition.x),
-      y: Number(account.partyPosition.y),
-    },
-    delegate: account.delegate ? account.delegate.toBase58() : null,
+    bump: Number(account.bump),
+    seed: Number(account.seed),
     width,
     height,
-    seed: Number(account.seed),
-    grid: [...account.grid],
+    isActive: Boolean(account.isActive),
+    heroesInside: Boolean(account.heroesInside),
+    heroCount: Number(account.heroCount),
+    heroMints: account.heroMints.map((key) => key.toBase58()),
+    heroSnapshots,
+    partyPosition,
+    itemCount: Number(account.itemCount),
+    items,
+    delegate: account.delegate ? account.delegate.toBase58() : null,
+    grid: Array.from(account.grid).map(Number),
     rooms,
     doors,
     chests,
     portals,
-    openedChests: [...account.openedChests],
-    usedPortals: [...account.usedPortals],
+    openedChests,
+    usedPortals,
     lastExitPortal: Number(account.lastExitPortal),
-    lastExitPosition: {
-      x: Number(account.lastExitPosition.x),
-      y: Number(account.lastExitPosition.y),
-    },
+    lastExitPosition,
     createdAt: Number(account.createdAt),
     lastStartedAt: Number(account.lastStartedAt),
+    lastResetAt: Number(account.lastResetAt),
+    lastCrewTimestamp: Number(account.lastCrewTimestamp),
+    lastCrewCount: Number(account.lastCrewCount),
+    lastCrew,
     torch: Number(account.torch),
   };
 }
 
-// ---------- Instructions ----------
+// Helper functions for working with items
+export const ItemSlotHelper = {
+  EMPTY_KEY: 255,
+
+  isEmpty(item: ItemSlot): boolean {
+    return item.itemKey === this.EMPTY_KEY || item.quantity === 0;
+  },
+
+  empty(): ItemSlot {
+    return {
+      itemKey: this.EMPTY_KEY,
+      quantity: 0,
+    };
+  },
+};
+
+// ---------- Instruction builders using BorshInstructionCoder ----------
+
 export async function createStartAdventureInstruction(options: {
   connection: Connection;
   player: PublicKey;
@@ -336,11 +371,19 @@ export async function createStartAdventureInstruction(options: {
   adventurePda: PublicKey;
   heroLockPdas: PublicKey[];
 }> {
-  const { connection, player, dungeonMint, heroMints, items = [] } = options;
-  const program = getAdventureProgram(connection, player);
+  const { player, dungeonMint, heroMints, items = [] } = options;
+
+  // SORT THE HERO MINTS TO MATCH RUST CODE
+  const sortedHeroMints = [...heroMints].sort((a, b) => {
+    const aBytes = a.toBuffer();
+    const bBytes = b.toBuffer();
+    return aBytes.compare(bBytes);
+  });
 
   const [adventurePda] = deriveAdventurePda(player, dungeonMint);
-  const heroLockPdas = heroMints.map((mint) => deriveHeroLockPda(mint)[0]);
+  const heroLockPdas = sortedHeroMints.map(
+    (mint) => deriveHeroLockPda(mint)[0]
+  );
 
   // Derive player economy PDA
   const [playerEconomyPda] = PublicKey.findProgramAddressSync(
@@ -348,28 +391,46 @@ export async function createStartAdventureInstruction(options: {
     PLAYER_ECONOMY_PROGRAM_ID
   );
 
-  // remaining accounts: [hero_mint, lock_pda] * N
-  const remainingAccounts = heroMints.flatMap((mint, index) => {
-    const lock = heroLockPdas[index];
-    return [
-      { pubkey: mint, isSigner: false, isWritable: true },
-      { pubkey: lock, isSigner: false, isWritable: true },
-    ];
+  // Encode instruction using BorshInstructionCoder
+  const data = instructionCoder.encode("start_adventure", {
+    hero_mints: sortedHeroMints,
+    items: items,
   });
 
-  const instruction = await program.methods
-    .startAdventure(heroMints, items)
-    .accountsPartial({
-      player,
-      dungeon: dungeonMint,
-      adventure: adventurePda,
-      playerEconomy: playerEconomyPda,
-      systemProgram: SystemProgram.programId,
-      heroProgram: HERO_CORE_PROGRAM_ID,
-      playerEconomyProgram: PLAYER_ECONOMY_PROGRAM_ID,
-    })
-    .remainingAccounts(remainingAccounts)
-    .instruction();
+  // Build the account keys
+  const keys = [
+    { pubkey: player, isSigner: true, isWritable: true },
+    { pubkey: dungeonMint, isSigner: false, isWritable: false },
+    { pubkey: adventurePda, isSigner: false, isWritable: true },
+    { pubkey: playerEconomyPda, isSigner: false, isWritable: true },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: HERO_CORE_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
+
+  // Add remaining accounts: [hero_mint, lock_pda] * N
+  for (let i = 0; i < sortedHeroMints.length; i++) {
+    const heroMint = sortedHeroMints[i];
+    const lockPda = heroLockPdas[i];
+
+    keys.push({
+      pubkey: heroMint,
+      isSigner: false,
+      isWritable: true,
+    });
+
+    keys.push({
+      pubkey: lockPda,
+      isSigner: false,
+      isWritable: true,
+    });
+  }
+
+  const instruction = new TransactionInstruction({
+    programId: ADVENTURE_ENGINE_PROGRAM_ID,
+    keys,
+    data,
+  });
 
   return {
     instruction,
@@ -382,18 +443,24 @@ export async function createSetDelegateInstruction(options: {
   connection: Connection;
   payer: PublicKey;
   adventurePda: PublicKey;
-  delegate?: PublicKey; // defaults to payer if not provided
+  delegate: PublicKey | null;
 }): Promise<{ instruction: TransactionInstruction }> {
-  const { connection, payer, adventurePda, delegate } = options;
-  const program = getAdventureProgram(connection, payer);
+  const { payer, adventurePda, delegate } = options;
 
-  const instruction = await program.methods
-    .setDelegate(delegate ?? null)
-    .accountsPartial({
-      payer,
-      adventure: adventurePda,
-    })
-    .instruction();
+  const data = instructionCoder.encode("set_delegate", {
+    delegate,
+  });
+
+  const keys = [
+    { pubkey: payer, isSigner: true, isWritable: true },
+    { pubkey: adventurePda, isSigner: false, isWritable: true },
+  ];
+
+  const instruction = new TransactionInstruction({
+    programId: ADVENTURE_ENGINE_PROGRAM_ID,
+    keys,
+    data,
+  });
 
   return { instruction };
 }
@@ -406,26 +473,10 @@ export async function createDelegateAdventureInstruction(options: {
   dungeonMint: PublicKey;
   validator?: PublicKey;
 }): Promise<{ instruction: TransactionInstruction }> {
-  const { connection, payer, adventurePda, owner, dungeonMint, validator } =
-    options;
-  const program = getAdventureProgram(connection, payer);
-
-  const remainingAccounts = validator
-    ? [{ pubkey: validator, isSigner: false, isWritable: false }]
-    : [];
-
-  const instruction = await program.methods
-    .delegateAdventure()
-    .accountsPartial({
-      payer,
-      pda: adventurePda,
-      owner,
-      dungeonMint,
-    })
-    .remainingAccounts(remainingAccounts)
-    .instruction();
-
-  return { instruction };
+  void options;
+  throw new Error(
+    "MagicBlock delegation is disabled while testing on main chain."
+  );
 }
 
 export async function createProcessUndelegationInstruction(options: {
@@ -438,27 +489,10 @@ export async function createProcessUndelegationInstruction(options: {
   instruction: TransactionInstruction;
   bufferPda: PublicKey;
 }> {
-  const { connection, payer, adventurePda, owner, dungeonMint } = options;
-  const program = getAdventureProgram(connection, payer);
-
-  const accountSeeds = [
-    ADVENTURE_SEED,
-    owner.toBuffer(),
-    dungeonMint.toBuffer(),
-  ];
-  const [bufferPda] = deriveAdventureBufferPda(adventurePda);
-
-  const instruction = await program.methods
-    .processUndelegation(accountSeeds)
-    .accountsPartial({
-      baseAccount: adventurePda,
-      buffer: bufferPda,
-      payer,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-
-  return { instruction, bufferPda };
+  void options;
+  throw new Error(
+    "MagicBlock delegation is disabled while testing on main chain."
+  );
 }
 
 // ---------- Moves ----------
@@ -546,9 +580,14 @@ export async function createExitAdventureInstruction(options: {
   const { connection, owner, authority, adventurePda, heroMints } = options;
   const program = getAdventureProgram(connection, owner);
 
+  const sortedHeroMints = [...heroMints].sort((a, b) => {
+    const aBytes = a.toBuffer();
+    const bBytes = b.toBuffer();
+    return aBytes.compare(bBytes);
+  });
+
   // Always pass hero accounts to unlock them via CPI to hero-core
-  // The #[commit] macro allows us to modify non-delegated accounts during commit
-  const remainingAccounts = heroMints.flatMap((heroMint) => {
+  const remainingAccounts = sortedHeroMints.flatMap((heroMint) => {
     const [heroLockPda] = deriveHeroLockPda(heroMint);
     return [
       { pubkey: heroMint, isSigner: false, isWritable: true },
@@ -563,8 +602,6 @@ export async function createExitAdventureInstruction(options: {
       authority,
       adventure: adventurePda,
       heroProgram: HERO_CORE_PROGRAM_ID,
-      magicProgram: MAGIC_PROGRAM_ID,
-      magicContext: MAGIC_CONTEXT_ID,
     })
     .remainingAccounts(remainingAccounts)
     .instruction();
@@ -640,7 +677,9 @@ export async function fetchHeroLockStatuses(
         statusMap.set(heroMintStr, {
           heroMint: heroMintStr,
           isActive,
-          adventure: adventure.equals(PublicKey.default) ? undefined : adventure.toBase58(),
+          adventure: adventure.equals(PublicKey.default)
+            ? undefined
+            : adventure.toBase58(),
           lastUpdated,
         });
       } catch (err) {

@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
 use dungeon_nft::state::DungeonMint;
-use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 
 use crate::{
     constants::ADVENTURE_SEED, errors::AdventureError, state::AdventureSession,
@@ -12,7 +11,7 @@ pub mod instructions;
 pub mod logic;
 pub mod state;
 
-declare_id!("9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt");
+declare_id!("Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC");
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -37,8 +36,7 @@ pub struct StartAdventure<'info> {
     #[account(mut)]
     pub player: Signer<'info>,
     #[account(
-        mut,
-        constraint = dungeon.owner == player.key() @ AdventureError::AdventureOwnerMismatch
+        constraint = dungeon.status == dungeon_nft::state::DungeonStatus::Ready @ AdventureError::DungeonNotReady
     )]
     pub dungeon: Account<'info, DungeonMint>,
     #[account(
@@ -77,7 +75,7 @@ pub struct SetDelegate<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
-#[delegate]
+// Delegation context retained for future MagicBlock integration.
 #[derive(Accounts)]
 pub struct DelegateAdventure<'info> {
     #[account(mut)]
@@ -86,7 +84,6 @@ pub struct DelegateAdventure<'info> {
     /// CHECK: PDA to delegate (validated by seeds/bump)
     #[account(
         mut,
-        del,
         seeds = [ADVENTURE_SEED, owner.key().as_ref(), dungeon_mint.key().as_ref()],
         bump
     )]
@@ -114,7 +111,6 @@ pub struct MoveHero<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
-#[commit]
 #[derive(Accounts)]
 pub struct ExitAdventure<'info> {
     /// CHECK: The owner of the adventure session (used for PDA derivation)
@@ -147,7 +143,6 @@ pub struct ManageItems<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
-#[ephemeral]
 #[program]
 pub mod adventure_engine {
     use super::*;
@@ -165,7 +160,7 @@ pub mod adventure_engine {
         crate::instructions::delegate::set_delegate(ctx, delegate)
     }
 
-    /// Only performs the delegation to the ephemeral rollup.
+    /// Delegation currently disabled while developing on main chain.
     pub fn delegate_adventure(ctx: Context<DelegateAdventure>) -> Result<()> {
         crate::instructions::delegate::delegate_adventure(ctx)
     }

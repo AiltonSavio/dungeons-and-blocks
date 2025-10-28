@@ -5,16 +5,16 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-adventure_engine = "9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt"
-hero_core = "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
-dungeon_nft = "3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw"
-player_economy = "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
+adventure_engine = "Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC"
+hero_core = "B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E"
+player_economy = "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+dungeon_nft = "3ygmxT7u6AVcU8Qjtv6W5fgRUvvmajb9Vst776EeT2uh"
 
 [programs.localnet]
-adventure-engine = "9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt"
-hero-core = "B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v"
-dungeon-nft = "3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw"
-player-economy = "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
+adventure-engine = "Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC"
+hero-core = "B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E"
+player-economy = "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+dungeon-nft = "3ygmxT7u6AVcU8Qjtv6W5fgRUvvmajb9Vst776EeT2uh"
 
 [registry]
 url = "https://api.apr.dev"

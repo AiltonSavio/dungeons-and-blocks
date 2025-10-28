@@ -22,16 +22,21 @@ import {
   directionFromDelta,
   fetchAdventureSessionSmart,
   deriveAdventurePda,
-  getAdventureProgram,
-  mapAdventureAccount,
+  createExitAdventureInstruction,
   TRAIT_NONE,
   type AdventureDirection,
 } from "../state/adventureChain";
 import { findTrait } from "../state/traitCatalog";
+import type { HeroClass, ItemDefinition } from "../state/models";
 import { deriveTempKeypair, isTempKeypairFunded } from "../state/tempKeypair";
-import type { HeroClass } from "../state/models";
-
-// ==================== TYPES ====================
+import {
+  InventoryItemParam,
+  InventorySlotView,
+  ITEM_DEFINITIONS,
+  ITEM_KEY_TO_ID,
+  ITEM_SLOT_EMPTY,
+  SupplySlot,
+} from "../state/items";
 
 enum Tile {
   Floor = 0,
@@ -87,6 +92,7 @@ type DungeonLaunchPayload = {
 type GameLaunchData = {
   seed?: number;
   heroes?: PartyHeroSnapshot[];
+  supplies?: SupplySlot[];
   dungeon?: DungeonLaunchPayload;
   adventure?: ChainAdventure;
   player?: string;
@@ -164,11 +170,24 @@ export default class Game extends Phaser.Scene {
   private adventureFetchPromise?: Promise<ChainAdventure | null>;
   private adventurePda?: PublicKey;
   private solanaConnection?: Connection;
-  private ephemeralConnection?: Connection;
   private playerPublicKey?: PublicKey;
   private tempKeypair?: Keypair;
-  private adventureSubscriptionId?: number;
   private heroHudTexts: Phaser.GameObjects.Text[] = [];
+  private heroHudPanel?: Phaser.GameObjects.Container;
+  private heroHudBg?: Phaser.GameObjects.Graphics;
+
+  private inventoryPanel?: Phaser.GameObjects.Container;
+  private inventorySlots: InventorySlotView[] = [];
+  private INVENTORY_SLOTS = 6;
+  private inventoryMargin = 12;
+  private inventoryPad = 10;
+  private inventoryCols = 3;
+  private inventoryCell = 48;
+  private inventoryGap = 8;
+  private inventoryPanelW = 0;
+  private inventoryPanelH = 0;
+
+  private initialSupplies?: SupplySlot[];
 
   // Movement tracking
   private lastConfirmedTile?: { x: number; y: number }; // Last on-chain confirmed position
@@ -179,13 +198,19 @@ export default class Game extends Phaser.Scene {
     seq: number;
   }> = [];
   private movementBusy = false;
-  private isDelegated = false;
-  private maxDelegationCheckAttempts = 5;
   private isNearInteractable = false; // Blocks movement when near chest/portal
 
   // Performance tracking
   private perfSeq = 0;
   private sceneReady = false;
+
+  private latencyMsEWMA = 350;
+  private readonly latencyAlpha = 0.55;
+  private readonly minLatencyMs = 80;
+  private readonly maxLatencyMs = 800;
+  private readonly safetyFactor = 0.8;
+  private readonly minTPS = 0.4;
+  private readonly maxTPS = 2.2;
 
   private get leader(): PartyMember | undefined {
     return this.party[0];
@@ -201,6 +226,8 @@ export default class Game extends Phaser.Scene {
   // ==================== LIFECYCLE ====================
 
   init(data?: GameLaunchData) {
+    console.log("[Game] init", data);
+
     this.partyHeroes = [];
 
     // Parse player public key
@@ -256,6 +283,14 @@ export default class Game extends Phaser.Scene {
       }
     }
 
+    if (Array.isArray(data?.supplies)) {
+      this.initialSupplies = data!.supplies;
+    }
+
+    if (this.playerPublicKey) {
+      this.initializeTempKeypair();
+    }
+
     // Setup party keys
     const heroKeys = this.partyHeroes
       .map((hero) => HERO_CLASS_TO_KEY[hero.cls])
@@ -289,6 +324,19 @@ export default class Game extends Phaser.Scene {
     this.load.image("loot_chest_02", "assets/items/chest/chest_02.png");
     this.load.image("loot_chest_03", "assets/items/chest/chest_03.png");
     this.load.image("portal_tile", "assets/tiles/portal.png");
+
+    const itemIcons = [
+      "pouch_gold",
+      "stress_tonic",
+      "minor_torch",
+      "healing_salve",
+      "mystery_relic",
+      "calming_incense",
+      "phoenix_feather",
+    ];
+    itemIcons.forEach((k) => {
+      this.load.image(`item_${k}`, `assets/items/${k}.png`);
+    });
   }
 
   async create(): Promise<void> {
@@ -311,20 +359,8 @@ export default class Game extends Phaser.Scene {
     this.lastPortalTileShown = undefined;
     this.isExitingDungeon = false;
 
-    // Initialize temp keypair
-    if (this.playerPublicKey) {
-      this.initializeTempKeypair();
-    }
-
     // Resolve adventure and dungeon data
     const adventureAccount = await this.resolveAdventureSession();
-    if (adventureAccount && this.adventurePda) {
-      await this.pollForDelegation();
-      if (this.isDelegated) {
-        await this.subscribeToAdventureAccount();
-        console.log("[Game] Subscribed to adventure account changes");
-      }
-    }
 
     const resolvedDungeon = await this.resolveDungeonAccount();
     if (resolvedDungeon) {
@@ -351,6 +387,14 @@ export default class Game extends Phaser.Scene {
 
     // Create animations
     this.createAnimations();
+
+    this.buildInventoryHud();
+    this.positionInventoryHud();
+
+    if (this.initialSupplies) {
+      const hudItems = this.suppliesToHudItems(this.initialSupplies);
+      this.setInventory(hudItems);
+    }
 
     // Setup party
     this.radius = (this.tileSize - 4) * 0.5;
@@ -397,6 +441,8 @@ export default class Game extends Phaser.Scene {
         new Phaser.Math.Vector2(this.party[0].x, this.party[0].y)
       );
     }
+
+    this.recomputeMovementSpeed();
 
     // Camera setup
     const leader = this.party[0];
@@ -446,6 +492,7 @@ export default class Game extends Phaser.Scene {
       this.updateCameraZoom();
       this.uiCam.setSize(this.scale.width, this.scale.height);
       this.minimap.handleResize(this.scale.width, this.scale.height);
+      this.positionInventoryHud();
       this.rebuildHeroHud();
     });
 
@@ -543,6 +590,30 @@ export default class Game extends Phaser.Scene {
 
   // ==================== MOVEMENT ====================
 
+  private recomputeMovementSpeed() {
+    const ms = Phaser.Math.Clamp(
+      this.latencyMsEWMA,
+      this.minLatencyMs,
+      this.maxLatencyMs
+    );
+    const chainTPS = 1000 / ms; // confirmations per second
+    const desiredTPS = Phaser.Math.Clamp(
+      chainTPS * this.safetyFactor,
+      this.minTPS,
+      this.maxTPS
+    );
+    this.speed = desiredTPS; // tiles per second
+    this.pxSpeed = this.speed * this.tileSize; // pixels per second
+    // (Optional) adjust follower spacing so trains look natural at higher speed
+    this.followerSpacingPx = Phaser.Math.Clamp(18 * (this.speed / 1.5), 12, 36);
+  }
+
+  private registerMoveLatency(ms: number) {
+    this.latencyMsEWMA =
+      this.latencyAlpha * ms + (1 - this.latencyAlpha) * this.latencyMsEWMA;
+    this.recomputeMovementSpeed();
+  }
+
   private isDown(k?: Phaser.Input.Keyboard.Key) {
     return !!k && k.isDown;
   }
@@ -584,7 +655,18 @@ export default class Game extends Phaser.Scene {
     direction: AdventureDirection,
     targetTile: { x: number; y: number }
   ) {
-    if (!this.isDelegated) {
+    if (!this.tempKeypair) {
+      console.warn("[Game] Temp keypair unavailable; skipping movement");
+      return;
+    }
+    const expectedDelegate = this.tempKeypair.publicKey.toBase58();
+    if (
+      !this.adventureSession ||
+      this.adventureSession.delegate !== expectedDelegate
+    ) {
+      console.warn(
+        "[Game] Adventure delegate mismatch; movement requires re-arming the temp key."
+      );
       return;
     }
 
@@ -599,6 +681,8 @@ export default class Game extends Phaser.Scene {
     // Update optimistic position immediately
     this.optimisticTile = { x: targetTile.x, y: targetTile.y };
 
+    if (this.movementQueue.length > 0 || this.movementBusy) return;
+
     // Add to queue with sequence number for tracking
     this.movementQueue.push({ direction, targetTile, seq });
     void this.processMovementQueue();
@@ -607,9 +691,12 @@ export default class Game extends Phaser.Scene {
   private async processMovementQueue(): Promise<void> {
     if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair)
       return;
-    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!eph || !connection) return;
+    if (!connection) {
+      console.warn("[Game] Connection unavailable for movement");
+      this.rollbackToConfirmed();
+      return;
+    }
 
     if (this.movementBusy || this.movementQueue.length === 0) return;
     this.movementBusy = true;
@@ -617,7 +704,6 @@ export default class Game extends Phaser.Scene {
     try {
       const move = this.movementQueue[0]; // Peek, don't shift yet
 
-      // Check funding once
       const funded = await this.checkTempKeypairFunded();
       if (!funded) {
         console.error("[Game] Temp keypair not funded");
@@ -640,25 +726,51 @@ export default class Game extends Phaser.Scene {
 
       for (let attempt = 0; attempt < maxRetries && !success; attempt++) {
         try {
-          const { blockhash } = await eph.getLatestBlockhash("processed");
+          const { blockhash, lastValidBlockHeight } =
+            await connection.getLatestBlockhash("confirmed");
           const tx = new Transaction();
           tx.feePayer = this.tempKeypair.publicKey;
           tx.recentBlockhash = blockhash;
           tx.add(ix);
           tx.sign(this.tempKeypair);
 
+          const signature = await connection.sendRawTransaction(
+            tx.serialize(),
+            {
+              skipPreflight: false,
+            }
+          );
+
           const t0 = performance.now();
-          const sig = await eph.sendRawTransaction(tx.serialize(), {
-            skipPreflight: true,
-          });
+          await connection.confirmTransaction(
+            { signature, blockhash, lastValidBlockHeight },
+            "confirmed"
+          );
           const dt = performance.now() - t0;
           console.log(
-            `[Perf] Move#${move.seq} sent in ${dt.toFixed(0)}ms, sig: ${sig}`
+            `[Perf] Move#${move.seq} confirmed in ${dt.toFixed(0)}ms`
           );
           success = true;
 
+          this.registerMoveLatency(dt);
+
           // Remove from queue only after successful send
           this.movementQueue.shift();
+
+          // Refresh adventure state from base layer
+          const updated = await fetchAdventureSessionSmart(
+            connection,
+            null,
+            this.adventurePda
+          );
+          if (updated) {
+            this.applyAdventureSession(updated);
+            this.lastConfirmedTile = {
+              x: updated.partyPosition.x,
+              y: updated.partyPosition.y,
+            };
+            this.optimisticTile = { ...this.lastConfirmedTile };
+          }
         } catch (err) {
           console.error(`[Game] Move attempt ${attempt + 1} failed:`, err);
           if (attempt === maxRetries - 1) {
@@ -1109,11 +1221,8 @@ export default class Game extends Phaser.Scene {
     // Call exit_adventure if we have the necessary data
     if (this.adventurePda && this.playerPublicKey && this.adventureSession) {
       try {
-        console.log("[Game] Getting connections...");
         const connection = this.getSolanaConnection();
-        const eph = this.getEphemeralConnection();
-
-        if (!connection || !eph) {
+        if (!connection) {
           console.error("[Game] No connection available for exit");
           this.showExitError("Connection unavailable");
           return;
@@ -1139,12 +1248,6 @@ export default class Game extends Phaser.Scene {
           this.showExitError("Please connect your wallet");
           return;
         }
-
-        // Import the function
-        console.log("[Game] Importing createExitAdventureInstruction...");
-        const { createExitAdventureInstruction } = await import(
-          "../state/adventureChain"
-        );
 
         // Get hero mints from adventure session
         console.log(
@@ -1187,64 +1290,61 @@ export default class Game extends Phaser.Scene {
           authority: walletPubkey,
           adventurePda: this.adventurePda,
           heroMints,
-          fromEphemeral: true, // Exiting from delegated state
+          fromEphemeral: false,
         });
 
         console.log("[Game] Exit instruction created successfully");
 
         // Build transaction for wallet signing
-        console.log("[Game] Getting latest blockhash from ephemeral...");
-        const { blockhash } = await eph.getLatestBlockhash("processed");
-        console.log("[Game] Blockhash:", blockhash);
+        console.log("[Game] Getting latest blockhash from base layer...");
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash("confirmed");
 
         const tx = new Transaction();
         tx.feePayer = walletPubkey;
         tx.recentBlockhash = blockhash;
         tx.add(ix);
-
         console.log("[Game] Transaction built, preparing to sign and send...");
 
-        console.log(
-          "[Game] Note: Exit with #[commit] macro MUST be sent to EPHEMERAL (hero mints are readonly now)"
-        );
-
-        // Simulate on EPHEMERAL where the delegated adventure account lives
-        console.log("[Game] Attempting transaction simulation on EPHEMERAL connection...");
+        // Simulate first
+        console.log("Attempting transaction simulation...");
         try {
-          const simulation = await eph.simulateTransaction(tx);
+          const simulation = await connection.simulateTransaction(tx);
           if (simulation.value.err) {
-            console.error("[Game] Simulation error:", simulation.value.err);
-            console.error("[Game] Simulation logs:", simulation.value.logs);
+            console.error("Simulation error:", simulation.value.err);
+            console.error("Simulation logs:", simulation.value.logs);
             throw new Error(
               `Simulation failed: ${JSON.stringify(simulation.value.err)}`
             );
           } else {
-            console.log("[Game] Simulation successful!");
-            console.log("[Game] Simulation logs:", simulation.value.logs);
+            console.log("Simulation successful");
+            console.log("Simulation logs:", simulation.value.logs);
           }
         } catch (simErr) {
-          console.error(
-            "[Game] Simulation attempt failed:",
-            simErr
-          );
+          console.error("Simulation attempt failed:", simErr);
           throw new Error("Transaction simulation failed.");
         }
 
-        // Sign with wallet and send to EPHEMERAL
+        // Sign with wallet and send to base chain
         let signature: string;
-        if (walletProvider.signTransaction) {
-          console.log("[Game] Signing transaction with wallet...");
+        if (walletProvider.signAndSendTransaction) {
+          const result = await walletProvider.signAndSendTransaction(tx);
+          signature = typeof result === "string" ? result : result.signature;
+        } else if (walletProvider.signTransaction) {
           const signed = await walletProvider.signTransaction(tx);
-          console.log("[Game] Transaction signed, sending to ephemeral...");
-          signature = await eph.sendRawTransaction(signed.serialize(), {
-            skipPreflight: true,
+          signature = await connection.sendRawTransaction(signed.serialize(), {
+            skipPreflight: false,
           });
-          console.log("[Game] Transaction sent to ephemeral:", signature);
         } else {
           throw new Error("Wallet does not support transaction signing");
         }
 
-        console.log(`[Game] Exit transaction sent successfully: ${signature}`);
+        await connection.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          "confirmed"
+        );
+
+        console.log(`[Game] Exit transaction confirmed: ${signature}`);
 
         // Success - close modal and return to town
         this.closePortalModal();
@@ -1397,28 +1497,8 @@ export default class Game extends Phaser.Scene {
     return this.solanaConnection;
   }
 
-  private getEphemeralConnection(): Connection | undefined {
-    if (typeof window === "undefined") return undefined;
-    if (!this.ephemeralConnection) {
-      const env =
-        (import.meta as unknown as { env?: Record<string, string | undefined> })
-          .env ?? {};
-      const http =
-        env.VITE_MAGICBLOCK_RPC_URL ??
-        (window as unknown as { __DNB_MAGICBLOCK_RPC__?: string })
-          .__DNB_MAGICBLOCK_RPC__ ??
-        "https://devnet.magicblock.app";
-
-      this.ephemeralConnection = new Connection(http, {
-        commitment: "processed",
-        confirmTransactionInitialTimeout: 20_000,
-      } as any);
-    }
-    return this.ephemeralConnection;
-  }
-
   private initializeTempKeypair(): void {
-    if (!this.playerPublicKey || this.tempKeypair) return;
+    if (!this.playerPublicKey) return;
     this.tempKeypair = deriveTempKeypair(this.playerPublicKey);
     console.log(
       "[Game] Temp keypair initialized:",
@@ -1431,151 +1511,6 @@ export default class Game extends Phaser.Scene {
     const connection = this.getSolanaConnection();
     if (!connection) return false;
     return isTempKeypairFunded(connection, this.tempKeypair);
-  }
-
-  private async verifyAdventureDelegation(): Promise<boolean> {
-    if (!this.adventurePda) return false;
-    const ephemeralConnection = this.getEphemeralConnection();
-    if (!ephemeralConnection) return false;
-
-    try {
-      const accountInfo = await ephemeralConnection.getAccountInfo(
-        this.adventurePda
-      );
-      if (!accountInfo) {
-        console.warn(
-          "[Game] Adventure account not found on ephemeral validator"
-        );
-        return false;
-      }
-      console.log("[Game] Adventure account verified on ephemeral validator");
-      return true;
-    } catch (err) {
-      console.error("[Game] Failed to verify adventure delegation:", err);
-      return false;
-    }
-  }
-
-  private async subscribeToAdventureAccount(): Promise<void> {
-    if (!this.adventurePda) return;
-    const eph = this.getEphemeralConnection();
-    if (!eph) return;
-
-    // Clear old subscription
-    if (this.adventureSubscriptionId !== undefined) {
-      try {
-        await eph.removeAccountChangeListener(this.adventureSubscriptionId);
-      } catch {}
-      this.adventureSubscriptionId = undefined;
-    }
-
-    // Subscribe to account changes
-    this.adventureSubscriptionId = eph.onAccountChange(
-      this.adventurePda,
-      (info) => {
-        if (!info) return;
-        try {
-          const program = getAdventureProgram(eph, this.playerPublicKey);
-          const decodedData = program.coder.accounts.decode(
-            "adventureSession",
-            info.data
-          );
-          const mapped = mapAdventureAccount(
-            this.adventurePda!,
-            decodedData as any
-          );
-          const pos = decodedData.partyPosition
-            ? {
-                x: Number(decodedData.partyPosition.x),
-                y: Number(decodedData.partyPosition.y),
-              }
-            : null;
-          if (!pos) return;
-          console.log(
-            `[Game] Position confirmed on-chain: (${pos.x}, ${pos.y})`
-          );
-
-          if (this.adventureSession) {
-            this.adventureSession.heroSnapshots = mapped.heroSnapshots;
-            this.adventureSession.heroCount = mapped.heroCount;
-            this.adventureSession.heroMints = mapped.heroMints;
-            this.adventureSession.partyPosition = mapped.partyPosition;
-          } else {
-            this.adventureSession = mapped;
-          }
-          this.rebuildHeroHud();
-
-          // Update confirmed position
-          this.lastConfirmedTile = { x: pos.x, y: pos.y };
-
-          // Mark tile as explored in minimap
-          this.minimap.markTileExplored(pos.x, pos.y);
-
-          // Remove confirmed moves from queue
-          this.movementQueue = this.movementQueue.filter(
-            (move) => move.targetTile.x !== pos.x || move.targetTile.y !== pos.y
-          );
-
-          // If position doesn't match optimistic, rollback
-          if (
-            this.optimisticTile &&
-            (this.optimisticTile.x !== pos.x || this.optimisticTile.y !== pos.y)
-          ) {
-            // Check if this is an expected intermediate position
-            const isExpected = this.movementQueue.some(
-              (move) =>
-                move.targetTile.x === pos.x && move.targetTile.y === pos.y
-            );
-
-            if (!isExpected && this.movementQueue.length === 0) {
-              // Position mismatch with empty queue - rollback
-              console.warn(
-                `[Game] Position mismatch: optimistic (${this.optimisticTile.x},${this.optimisticTile.y}) vs confirmed (${pos.x},${pos.y}). Rolling back.`
-              );
-              this.rollbackToConfirmed();
-            }
-          }
-        } catch (err) {
-          console.error(
-            "[Game] Failed to handle adventure account change:",
-            err
-          );
-        }
-      },
-      "processed"
-    );
-
-    console.log(
-      "[Game] Subscribed to adventure PDA via WS:",
-      this.adventurePda.toBase58()
-    );
-  }
-
-  private async pollForDelegation(): Promise<void> {
-    console.log("[Game] Polling for adventure delegation...");
-
-    for (let i = 0; i < this.maxDelegationCheckAttempts; i++) {
-      const verified = await this.verifyAdventureDelegation();
-
-      if (verified) {
-        this.isDelegated = true;
-        console.log(`[Game] Delegation verified on attempt ${i + 1}`);
-        return;
-      }
-
-      const delay = Math.min(500 * Math.pow(2, i), 8000);
-      console.log(
-        `[Game] Delegation not ready, retrying in ${delay}ms (attempt ${
-          i + 1
-        }/${this.maxDelegationCheckAttempts})`
-      );
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-
-    console.warn(
-      "[Game] Failed to verify delegation after max attempts. Movement will be disabled."
-    );
-    this.isDelegated = false;
   }
 
   private async resolveAdventureSession(): Promise<ChainAdventure | null> {
@@ -1606,8 +1541,7 @@ export default class Game extends Phaser.Scene {
     }
 
     const connection = this.getSolanaConnection();
-    const ephemeralConnection = this.getEphemeralConnection();
-    if (!connection || !ephemeralConnection) {
+    if (!connection) {
       return this.adventureSession ?? null;
     }
 
@@ -1620,7 +1554,7 @@ export default class Game extends Phaser.Scene {
 
       this.adventureFetchPromise = fetchAdventureSessionSmart(
         connection,
-        ephemeralConnection,
+        null,
         adventurePda
       );
       return await this.adventureFetchPromise;
@@ -1726,20 +1660,6 @@ export default class Game extends Phaser.Scene {
   }
 
   private cleanup() {
-    if (this.adventureSubscriptionId !== undefined) {
-      const eph = this.getEphemeralConnection();
-      if (eph) {
-        eph
-          .removeAccountChangeListener(this.adventureSubscriptionId)
-          .catch((err) =>
-            console.error(
-              "[Game] Failed to remove adventure subscription:",
-              err
-            )
-          );
-      }
-      this.adventureSubscriptionId = undefined;
-    }
     this.movementQueue = [];
     this.movementBusy = false;
     this.closePortalModal();
@@ -1747,39 +1667,94 @@ export default class Game extends Phaser.Scene {
     this.isExitingDungeon = false;
     this.heroHudTexts.forEach((text) => text.destroy());
     this.heroHudTexts = [];
+    this.heroHudBg?.destroy();
+    this.heroHudBg = undefined;
+    this.heroHudPanel?.destroy();
+    this.heroHudPanel = undefined;
   }
 
   private rebuildHeroHud() {
-    this.heroHudTexts.forEach((text) => text.destroy());
+    // Clean up old HUD
+    this.heroHudTexts.forEach((t) => t.destroy());
     this.heroHudTexts = [];
+    this.heroHudBg?.destroy();
+    this.heroHudBg = undefined;
+    this.heroHudPanel?.destroy();
+    this.heroHudPanel = undefined;
+
     if (!this.uiLayer) return;
 
     const snapshots = this.adventureSession?.heroSnapshots ?? [];
     if (!snapshots.length) return;
 
-    const startX = 16;
-    let cursorY = 16;
+    // Panel layout
+    const margin = 12;
+    const padX = 10;
+    const padY = 10;
+    const lineGap = 6;
+    const fontSizePx = 11;
+    const font = "monospace";
+
+    // Build texts first to measure size
+    const tempTexts: Phaser.GameObjects.Text[] = [];
+    const startX = margin + padX;
+    let cursorY = margin + padY;
     const maxHeroes = Math.min(this.partyLength, snapshots.length);
+    let maxWidth = 0;
 
     for (let index = 0; index < maxHeroes; index++) {
       const snapshot = snapshots[index];
       const label = this.formatHeroHud(snapshot, index);
       const text = this.add
         .text(startX, cursorY, label, {
-          fontFamily: "monospace",
-          fontSize: "12px",
-          color: "#dedede",
+          fontFamily: font,
+          fontSize: `${fontSizePx}px`,
+          color: "#e6e6e6",
           align: "left",
           lineSpacing: 2,
         })
         .setOrigin(0, 0)
         .setScrollFactor(0)
-        .setDepth(10_000);
+        .setDepth(10_001);
 
-      this.heroHudTexts.push(text);
+      // subtle shadow for readability
+      text.setShadow(1, 1, "#000000", 2, false, true);
+
+      tempTexts.push(text);
       this.uiLayer.add(text);
-      cursorY += text.height + 8;
+
+      maxWidth = Math.max(maxWidth, text.width);
+      cursorY += text.height + lineGap;
     }
+
+    // Compute panel rect
+    const panelWidth = padX * 2 + maxWidth;
+    const panelHeight = padY * 2 + (cursorY - (margin + padY) - lineGap);
+
+    // Background graphics (semi-transparent)
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, 0.6);
+    // rounded rect look using Graphics
+    const x = margin;
+    const y = margin;
+    const r = 8;
+    bg.fillRoundedRect(x, y, panelWidth, panelHeight, r);
+    bg.lineStyle(1, 0xffffff, 0.08);
+    bg.strokeRoundedRect(x, y, panelWidth, panelHeight, r);
+    bg.setScrollFactor(0);
+    bg.setDepth(10_000);
+
+    this.uiLayer.add(bg);
+
+    // Make a container to group bg + texts (handy if you want to move it later)
+    const panel = this.add.container(0, 0, [bg, ...tempTexts]);
+    panel.setDepth(10_000);
+    this.uiLayer.add(panel);
+
+    // Save refs so we can destroy later
+    this.heroHudPanel = panel;
+    this.heroHudBg = bg;
+    this.heroHudTexts = tempTexts;
   }
 
   private formatHeroHud(snapshot: ChainHeroSnapshot, index: number): string {
@@ -1790,7 +1765,9 @@ export default class Game extends Phaser.Scene {
     const stressValue = Math.min(snapshot.stress, stressCap);
     const hpLine = `HP ${snapshot.currentHp}/${snapshot.maxHp} | Stress ${stressValue}/${stressCap}`;
     const statsLine = `ATK ${snapshot.attack} DEF ${snapshot.defense} MAG ${snapshot.magic} RES ${snapshot.resistance} SPD ${snapshot.speed} LCK ${snapshot.luck}`;
-    const statusLine = `Status: ${this.describeStatuses(snapshot.statusEffects)}`;
+    const statusLine = `Status: ${this.describeStatuses(
+      snapshot.statusEffects
+    )}`;
     const traitsLine = `Traits: ${this.describeTraits(snapshot)}`;
     return `${name} (${cls}) Lv ${snapshot.level}\n${hpLine}\n${statsLine}\n${statusLine}\n${traitsLine}`;
   }
@@ -1823,5 +1800,306 @@ export default class Game extends Phaser.Scene {
     const posText = positiveLabels || "None";
     const negText = negativeLabels || "None";
     return `+ ${posText} | - ${negText}`;
+  }
+
+  private buildInventoryHud() {
+    // Clean old
+    this.inventoryPanel?.destroy();
+    this.inventoryPanel = undefined;
+    this.inventorySlots.forEach((s) => s.container.destroy());
+    this.inventorySlots = [];
+
+    if (!this.uiLayer) return;
+
+    // Panel container
+    const panel = this.add.container(0, 0);
+    panel.setDepth(10_000);
+    this.uiLayer.add(panel);
+    this.inventoryPanel = panel;
+
+    // Compute grid size
+    const cols = this.inventoryCols;
+    const rows = Math.ceil(this.INVENTORY_SLOTS / cols);
+    const cell = this.inventoryCell;
+    const gap = this.inventoryGap;
+
+    this.inventoryPanelW =
+      this.inventoryPad * 2 + cols * cell + (cols - 1) * gap;
+    this.inventoryPanelH =
+      this.inventoryPad * 2 + rows * cell + (rows - 1) * gap;
+
+    // Background
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, 0.55);
+    bg.fillRoundedRect(0, 0, this.inventoryPanelW, this.inventoryPanelH, 10);
+    bg.lineStyle(1, 0xffffff, 0.08);
+    bg.strokeRoundedRect(0, 0, this.inventoryPanelW, this.inventoryPanelH, 10);
+    panel.add(bg);
+
+    // Create empty slots
+    for (let i = 0; i < this.INVENTORY_SLOTS; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = this.inventoryPad + col * (cell + gap);
+      const y = this.inventoryPad + row * (cell + gap);
+
+      const slot = this.createInventorySlotView(i, x, y, cell);
+      panel.add(slot.container);
+      this.inventorySlots.push(slot);
+    }
+  }
+
+  private positionInventoryHud() {
+    if (!this.inventoryPanel) return;
+    const uiW = this.uiCam?.width ?? this.scale.width;
+    const uiH = this.uiCam?.height ?? this.scale.height;
+    const x = this.inventoryMargin;
+    const y = uiH - this.inventoryMargin - this.inventoryPanelH;
+    this.inventoryPanel.setPosition(x, y);
+  }
+
+  // Create one slot view
+  private createInventorySlotView(
+    idx: number,
+    x: number,
+    y: number,
+    size: number
+  ): InventorySlotView {
+    const c = this.add.container(x, y);
+
+    const bg = this.add
+      .rectangle(0, 0, size, size, 0x0f0f14, 0.9)
+      .setOrigin(0)
+      .setStrokeStyle(1, 0xffffff, 0.1);
+
+    // subtle grid sheen
+    const border = this.add
+      .rectangle(0, 0, size, size)
+      .setOrigin(0)
+      .setStrokeStyle(1, 0xffffff, 0.05);
+
+    c.add(bg);
+    c.add(border);
+
+    // Count badge (hidden by default)
+    const countBg = this.add
+      .rectangle(size - 14, 14, 20, 16, 0x000000, 0.75)
+      .setOrigin(1, 0)
+      .setVisible(false);
+    countBg.setStrokeStyle(1, 0xffffff, 0.1);
+
+    const countText = this.add
+      .text(countBg.x - 10, countBg.y + 8, "1", {
+        fontFamily: "monospace",
+        fontSize: "11px",
+        color: "#e6e6e6",
+      })
+      .setOrigin(0.5)
+      .setVisible(false);
+
+    c.add(countBg);
+    c.add(countText);
+
+    const slot: InventorySlotView = {
+      container: c,
+      bg,
+      border,
+      idx,
+      qty: 0,
+      usable: false,
+      countBg,
+      countText,
+    };
+
+    // Interactions
+    c.setSize(size, size);
+    c.setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, size, size),
+      Phaser.Geom.Rectangle.Contains
+    );
+
+    c.on("pointerover", () => {
+      border.setStrokeStyle(1, 0x6dd5ff, 0.8);
+      this.uiShowItemTooltip(slot);
+    });
+    c.on("pointerout", () => {
+      border.setStrokeStyle(1, 0xffffff, 0.05);
+      this.uiHideItemTooltip();
+    });
+    c.on("pointerdown", () => {
+      if (slot.id && slot.usable && slot.qty > 0) {
+        this.tryUseItem(slot.id);
+      } else {
+        // not usable or empty
+        this.flashSlot(slot);
+      }
+    });
+
+    return slot;
+  }
+
+  // Apply items to HUD (call this when you have data)
+  private setInventory(items: InventoryItemParam[]) {
+    // Normalize length to INVENTORY_SLOTS
+    const data = items.slice(0, this.INVENTORY_SLOTS);
+    while (data.length < this.INVENTORY_SLOTS)
+      data.push({ id: undefined as any, qty: 0 });
+
+    for (let i = 0; i < this.INVENTORY_SLOTS; i++) {
+      const slot = this.inventorySlots[i];
+      const item = data[i];
+      if (!item || !item.id || item.qty <= 0) {
+        this.updateSlotViewEmpty(slot);
+      } else {
+        this.updateSlotView(slot, item.id, item.qty);
+      }
+    }
+  }
+
+  private suppliesToHudItems(
+    slots: SupplySlot[]
+  ): { id: keyof typeof ITEM_DEFINITIONS; qty: number }[] {
+    // Keep only valid, non-empty, with qty > 0, then slice to HUD size
+    const items: { id: keyof typeof ITEM_DEFINITIONS; qty: number }[] = [];
+    for (const s of slots) {
+      if (!s || s.itemKey === ITEM_SLOT_EMPTY || s.quantity <= 0) continue;
+      const id = ITEM_KEY_TO_ID[s.itemKey];
+      if (!id) continue;
+      items.push({ id, qty: s.quantity });
+      if (items.length >= this.INVENTORY_SLOTS) break;
+    }
+    return items;
+  }
+
+  // Wire AdventureSession.items later: convert item_key -> your ItemId string
+  // Example stub (replace when you map item_key to ItemId):
+  private mapAdventureItemsToHud(
+    items: { item_key: number; quantity: number }[]
+  ): InventoryItemParam[] {
+    // TODO: Implement with your actual player-economy mapping
+    // For now, return empty
+    return [];
+  }
+
+  private updateSlotViewEmpty(slot: InventorySlotView) {
+    slot.id = undefined;
+    slot.qty = 0;
+    slot.usable = false;
+
+    // Remove icon if any
+    slot.icon?.destroy();
+    slot.icon = undefined;
+
+    // Muted look
+    slot.bg.setFillStyle(0x0f0f14, 0.9);
+    slot.border?.setStrokeStyle(1, 0xffffff, 0.05);
+
+    // Hide count
+    slot.countBg?.setVisible(false);
+    slot.countText?.setVisible(false);
+  }
+
+  private updateSlotView(
+    slot: InventorySlotView,
+    id: keyof typeof ITEM_DEFINITIONS,
+    qty: number
+  ) {
+    slot.id = id;
+    slot.qty = qty;
+
+    const def = ITEM_DEFINITIONS[id];
+    slot.usable =
+      !!def.usable &&
+      id !== "pouch_gold" &&
+      id !== "mystery_relic" &&
+      id !== "phoenix_feather";
+
+    // Border by rarity (subtle)
+    const rarityColor = this.colorForRarity(def.rarity);
+    slot.border?.setStrokeStyle(1, rarityColor, 0.65);
+
+    // Icon (try asset key -> fallback placeholder)
+    const key = `item_${id}`;
+    const size = this.inventoryCell;
+    const centerX = size * 0.5;
+    const centerY = size * 0.5;
+
+    slot.icon?.destroy();
+    if (this.textures.exists(key)) {
+      slot.icon = this.add
+        .image(centerX, centerY, key)
+        .setDisplaySize(size - 10, size - 10)
+        .setOrigin(0.5);
+    } else {
+      // Placeholder
+      slot.icon = this.add
+        .image(centerX, centerY, "floor_clean_tile") // any small texture you have
+        .setDisplaySize(size - 10, size - 10)
+        .setOrigin(0.5)
+        .setTint(0x333333);
+    }
+    slot.container.add(slot.icon);
+
+    // Count badge (only for stacks > 1)
+    const showCount = qty > 1;
+    if (slot.countBg && slot.countText) {
+      slot.countBg.setVisible(showCount);
+      slot.countText.setVisible(showCount);
+      if (showCount) {
+        slot.countText.setText(String(qty));
+      }
+    }
+  }
+
+  private colorForRarity(rarity: ItemDefinition["rarity"] | undefined): number {
+    switch (rarity) {
+      case "common":
+        return 0xb0b0b0;
+      case "uncommon":
+        return 0x6dd5ff;
+      case "rare":
+        return 0xffe66d;
+      default:
+        return 0xffffff;
+    }
+  }
+
+  private flashSlot(slot: InventorySlotView) {
+    this.tweens.add({
+      targets: slot.bg,
+      alpha: { from: 0.9, to: 0.6 },
+      yoyo: true,
+      duration: 100,
+      repeat: 1,
+    });
+  }
+
+  private tryUseItem(id: keyof typeof ITEM_DEFINITIONS) {
+    const def = ITEM_DEFINITIONS[id];
+    if (!def?.usable) return;
+
+    // Hook your actual "use item" flow here
+    console.log(`[Game] Use item requested: ${def.name}`);
+
+    // For demo: just flash and decrement from HUD (no chain write)
+    const slot = this.inventorySlots.find((s) => s.id === id && s.qty > 0);
+    if (!slot) return;
+    const newQty = slot.qty - 1;
+    if (newQty > 0) {
+      this.updateSlotView(slot, id, newQty);
+    } else {
+      this.updateSlotViewEmpty(slot);
+    }
+  }
+
+  // Simple tooltip (optional). For now, log to console.
+  // You can expand to a full tooltip panel like your portal modal.
+  private uiShowItemTooltip(slot: InventorySlotView) {
+    if (!slot.id) return;
+    const def = ITEM_DEFINITIONS[slot.id];
+    console.log(`[Tip] ${def.name}: ${def.description}`);
+  }
+  private uiHideItemTooltip() {
+    /* no-op for now */
   }
 }

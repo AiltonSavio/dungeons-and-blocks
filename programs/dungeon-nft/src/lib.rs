@@ -20,7 +20,7 @@ pub use instructions::{
     mint::{CallbackMintDungeon, MintDungeon, MintDungeonWithSeed},
 };
 
-declare_id!("3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw");
+declare_id!("3ygmxT7u6AVcU8Qjtv6W5fgRUvvmajb9Vst776EeT2uh");
 
 #[program]
 pub mod dungeon_nft {

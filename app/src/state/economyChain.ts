@@ -3,7 +3,7 @@ import { Buffer } from "buffer";
 import type { ItemId } from "./items";
 
 export const PLAYER_ECONOMY_PROGRAM_ID = new PublicKey(
-  "7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj"
+  "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
 );
 
 export const PLAYER_ECONOMY_SEED = Buffer.from("player_economy");

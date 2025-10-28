@@ -96,3 +96,33 @@ export function resolveItem(id: ItemId): ItemDefinition {
   if (!def) throw new Error(`Unknown item definition for ${id}`);
   return def;
 }
+
+export type InventoryItemParam = { id: keyof typeof ITEM_DEFINITIONS; qty: number };
+
+export type InventorySlotView = {
+  container: Phaser.GameObjects.Container;
+  bg: Phaser.GameObjects.Rectangle;
+  icon?: Phaser.GameObjects.Image;
+  countBg?: Phaser.GameObjects.Rectangle;
+  countText?: Phaser.GameObjects.Text;
+  border?: Phaser.GameObjects.Rectangle;
+  idx: number;
+  id?: keyof typeof ITEM_DEFINITIONS;
+  qty: number;
+  usable: boolean;
+};
+
+export type SupplySlot = { itemKey: number; quantity: number };
+
+export const ITEM_SLOT_EMPTY = 255 as const;
+
+export const ITEM_KEY_TO_ID: Record<number, keyof typeof ITEM_DEFINITIONS | undefined> = {
+  0: "pouch_gold",
+  1: "stress_tonic",
+  2: "minor_torch",
+  3: "healing_salve",
+  4: "calming_incense",
+  5: "mystery_relic",
+  6: "phoenix_feather",
+  [ITEM_SLOT_EMPTY]: undefined, // 255 => empty
+};

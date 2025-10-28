@@ -1,4 +1,8 @@
-import { AnchorProvider, Program } from "@coral-xyz/anchor";
+import {
+  BorshInstructionCoder,
+  AnchorProvider,
+  Program,
+} from "@coral-xyz/anchor";
 import type { IdlAccounts } from "@coral-xyz/anchor";
 import {
   Connection,
@@ -27,6 +31,9 @@ const DEFAULT_VRF_QUEUE = new PublicKey(
 const VRF_PROGRAM_ID = new PublicKey(
   "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
 );
+
+// Create instruction coder
+const instructionCoder = new BorshInstructionCoder(dungeonIdl as any);
 
 type DungeonMintAccount = IdlAccounts<DungeonNft>["dungeonMint"];
 
@@ -222,19 +229,22 @@ export async function createMintDungeonInstruction(options: {
     DUNGEON_NFT_PROGRAM_ID
   );
 
-  const instruction = await program.methods
-    .mintDungeon()
-    .accountsPartial({
-      payer,
-      config: configPda,
-      dungeon: dungeonPda,
-      oracleQueue: DEFAULT_VRF_QUEUE,
-      programIdentity,
-      vrfProgram: VRF_PROGRAM_ID,
-      slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
+  const data = instructionCoder.encode("mint_dungeon", {});
+
+  const instruction = new TransactionInstruction({
+    programId: DUNGEON_NFT_PROGRAM_ID,
+    keys: [
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: configPda, isSigner: false, isWritable: true },
+      { pubkey: dungeonPda, isSigner: false, isWritable: true },
+      { pubkey: DEFAULT_VRF_QUEUE, isSigner: false, isWritable: true },
+      { pubkey: programIdentity, isSigner: false, isWritable: true },
+      { pubkey: VRF_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: SYSVAR_SLOT_HASHES_PUBKEY, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
 
   return {
     instruction,

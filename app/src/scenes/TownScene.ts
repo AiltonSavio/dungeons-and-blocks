@@ -17,7 +17,6 @@ import {
   BUTTON_DIMENSIONS,
   snap,
 } from "../ui/uiConfig";
-import { setInventoryVisible } from "../ui/hudControls";
 import {
   ChainHero,
   PlayerProfile,
@@ -182,10 +181,6 @@ export class TownScene extends Phaser.Scene {
       .container(this.scale.width / 2, this.safe)
       .setDepth(60);
 
-    const hideInventory = () => setInventoryVisible(false);
-    hideInventory();
-    this.events.on(Phaser.Scenes.Events.RESUME, hideInventory);
-
     this.releaseKeyboardBindings();
 
     const background = renderBackground(this, this.safe, this.worldLayer);
@@ -250,7 +245,6 @@ export class TownScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unsubChange?.();
       this.unsubToast?.();
-      this.events.off(Phaser.Scenes.Events.RESUME, hideInventory);
       this.input.off(
         "pointermove",
         this.rosterPanel.handlePointerMove,

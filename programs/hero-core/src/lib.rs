@@ -78,27 +78,11 @@ pub use instructions::{
     tavern::TavernService,
 };
 
-declare_id!("B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v");
+declare_id!("B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E");
 
 #[program]
 pub mod hero_core {
     use super::*;
-    use instructions::{
-        abbey::AbbeyService,
-        adventure::{AdventureWrite, LockCtx, UnlockCtx},
-        blacksmith::{BlacksmithService, CallbackRerollStats},
-        burn::BurnHero,
-        devtools::HeroDevTools,
-        initialize::InitializePlayer,
-        level_up::{CallbackLevelUpHero, LevelUpHero},
-        mint::{
-            CallbackMintHeroFree, CallbackMintHeroPaid, MintHeroFree, MintHeroPaid,
-            MintHeroWithSeed,
-        },
-        sanitarium::SanitariumTreatment,
-        status::ModifyStatusEffect,
-        tavern::TavernService,
-    };
 
     pub fn initialize_player(ctx: Context<InitializePlayer>) -> Result<()> {
         instructions::initialize::initialize_player(ctx)

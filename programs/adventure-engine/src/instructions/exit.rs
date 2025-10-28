@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 use hero_core::cpi::accounts::{AdventureWrite as HeroAdventureWriteCtx, UnlockCtx};
 use hero_core::state::AdventureHeroStats;
 
@@ -36,8 +35,6 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
         portal_hit.ok_or_else(|| error!(AdventureError::NoPortalAtPosition))?;
 
     let now = Clock::get()?.unix_timestamp;
-    let adventure_account_info = ctx.accounts.adventure.to_account_info();
-
     let hero_mints: Vec<Pubkey> = adventure_ref.hero_mints[..hero_count]
         .iter()
         .copied()
@@ -124,18 +121,5 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
         adventure.last_crew_timestamp = now;
     }
 
-    // Serialize the updated adventure state before the commit CPI reassigns ownership.
-    ctx.accounts.adventure.exit(&crate::ID)?;
-
-    let payer_info = ctx.accounts.authority.to_account_info();
-    let adventure_info = adventure_account_info.clone();
-    let magic_program_info = ctx.accounts.magic_program.to_account_info();
-
-    commit_and_undelegate_accounts(
-        &payer_info,
-        vec![&adventure_info],
-        &ctx.accounts.magic_context,
-        &magic_program_info,
-    )
-    .map_err(Into::into)
+    Ok(())
 }

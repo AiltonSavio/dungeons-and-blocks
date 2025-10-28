@@ -69,9 +69,11 @@ pub fn load_hero_lock(account_info: &AccountInfo<'_>) -> Result<HeroAdventureLoc
     if discriminator.iter().all(|&b| b == 0) {
         return Ok(HeroAdventureLock::default());
     }
-    let mut cursor: &[u8] = &data[8..];
-    HeroAdventureLock::try_deserialize(&mut cursor)
-        .map_err(|_| error!(AdventureError::InvalidHeroLockAccount))
+
+    let mut cursor: &[u8] = &data[..];
+    HeroAdventureLock::try_deserialize(&mut cursor).map_err(|e| {
+        error!(AdventureError::InvalidHeroLockAccount)
+    })
 }
 
 pub fn store_hero_lock(account_info: &AccountInfo<'_>, value: &HeroAdventureLock) -> Result<()> {

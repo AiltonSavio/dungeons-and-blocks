@@ -47,14 +47,14 @@ cd programs/hero-core && cargo clippy
 
 This project consists of four interconnected Anchor programs that work together to create an on-chain dungeon crawler:
 
-**1. `dungeon-nft` (3qfE22hKoyPcDvtuYEAkCj9kuFHJVdXRkN6Qpp4UZhuw)**
+**1. `dungeon-nft` (3ygmxT7u6AVcU8Qjtv6W5fgRUvvmajb9Vst776EeT2uh)**
 - Mints dungeon NFTs with deterministic procedurally-generated layouts
 - Uses VRF (Verifiable Random Function) for randomness via callback pattern
 - Stores dungeon grid dimensions, seed, and metadata on-chain in `DungeonMint` accounts
 - Managed by `DungeonConfig` account initialized via `init-dungeon-config.js`
 - Key instructions: `initialize_config`, `mint_dungeon`, `callback_mint_dungeon`, `mint_dungeon_with_seed`
 
-**2. `hero-core` (B4aW9eJbVnTrTTR9SYqVRodYt13TAQEmkhJ2JNMaVM7v)**
+**2. `hero-core` (B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E)**
 - Manages hero NFT lifecycle: minting, leveling, status effects, traits, stress, and burning
 - Supports both free and paid minting with VRF randomness for stat generation
 - Provides adventure locking mechanisms to prevent heroes from being used in multiple adventures simultaneously
@@ -62,7 +62,7 @@ This project consists of four interconnected Anchor programs that work together 
 - Key account types: `PlayerAccount`, `HeroMint` (stores hero stats, XP, HP, status effects, stress, traits)
 - Key instructions: `mint_hero_free`, `mint_hero_paid`, `mint_hero_with_seed`, `level_up_hero`, `callback_level_up_hero`, `lock_for_adventure`, `unlock_from_adventure`, `update_hp_from_adventure`, `abbey_service`, `tavern_service`, `sanitarium_treatment`, `blacksmith_service`, `callback_reroll_stats`
 
-**3. `player-economy` (7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj)**
+**3. `player-economy` (8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ)**
 - Manages player gold and persistent item inventory across all adventures
 - Provides buy/sell shop mechanics with defined item prices and stack limits
 - Tracks hourly gold grants with cooldown system (200 gold every 60 minutes)
@@ -71,7 +71,7 @@ This project consists of four interconnected Anchor programs that work together 
 - Item definitions: `PouchGold`, `StressTonic`, `MinorTorch`, `HealingSalve`, `MysteryRelic`, `CalmingIncense`, `PhoenixFeather`
 - Key instructions: `initialize_player_economy`, `buy_item`, `sell_item`, `spend_gold`, `grant_hourly_gold`, `consume_items`
 
-**4. `adventure-engine` (9qbdCw4BAiyecsGd1oJ1EfnCgYbBMxuYeWr7tpZ3BqAt)**
+**4. `adventure-engine` (Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC)**
 - Ephemeral rollup-based program using MagicBlock's Bolt SDK
 - Manages active dungeon runs: movement, combat, loot, portal traversal, and ephemeral item inventory
 - Creates `AdventureSession` accounts that track hero positions, opened chests, used portals, dungeon state, and items collected during the run

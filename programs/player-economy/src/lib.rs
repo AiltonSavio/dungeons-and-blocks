@@ -32,7 +32,7 @@ pub use instructions::{
     items::{ConsumeItems, ModifyItemStock},
 };
 
-declare_id!("7wWA6dk96DR9g3NVSw5iQkHFCidK7DdV3V71Auv9bZMj");
+declare_id!("8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ");
 
 #[program]
 pub mod player_economy {
