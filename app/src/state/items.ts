@@ -33,6 +33,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = {
     name: "Gold Pouch",
     description: "Redeem for a burst of 25 gold.",
     rarity: "common",
+    maxStack: 0,
     usable: false,
     sellPrice: 25,
   },
@@ -97,7 +98,10 @@ export function resolveItem(id: ItemId): ItemDefinition {
   return def;
 }
 
-export type InventoryItemParam = { id: keyof typeof ITEM_DEFINITIONS; qty: number };
+export type InventoryItemParam = {
+  id: keyof typeof ITEM_DEFINITIONS;
+  qty: number;
+};
 
 export type InventorySlotView = {
   container: Phaser.GameObjects.Container;
@@ -116,13 +120,26 @@ export type SupplySlot = { itemKey: number; quantity: number };
 
 export const ITEM_SLOT_EMPTY = 255 as const;
 
-export const ITEM_KEY_TO_ID: Record<number, keyof typeof ITEM_DEFINITIONS | undefined> = {
+export const ITEM_KEY_TO_ID: Record<
+  number,
+  keyof typeof ITEM_DEFINITIONS | undefined
+> = {
   0: "pouch_gold",
   1: "stress_tonic",
   2: "minor_torch",
   3: "healing_salve",
-  4: "calming_incense",
-  5: "mystery_relic",
+  4: "mystery_relic",
+  5: "calming_incense",
   6: "phoenix_feather",
   [ITEM_SLOT_EMPTY]: undefined, // 255 => empty
+};
+
+export const ITEM_ID_TO_KEY: Record<ItemId, number> = {
+  pouch_gold: 0,
+  stress_tonic: 1,
+  minor_torch: 2,
+  healing_salve: 3,
+  mystery_relic: 4,
+  calming_incense: 5,
+  phoenix_feather: 6,
 };

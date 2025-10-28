@@ -1,4 +1,8 @@
-import { SystemProgram, TransactionInstruction, PublicKey } from "@solana/web3.js";
+import {
+  SystemProgram,
+  TransactionInstruction,
+  PublicKey,
+} from "@solana/web3.js";
 import { Buffer } from "buffer";
 import type { ItemId } from "./items";
 
@@ -28,9 +32,7 @@ const ITEM_KEY_TO_INDEX: Record<ItemId, number> = {
   phoenix_feather: 6,
 };
 
-export function derivePlayerEconomyPda(
-  owner: PublicKey
-): [PublicKey, number] {
+export function derivePlayerEconomyPda(owner: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [PLAYER_ECONOMY_SEED, owner.toBuffer()],
     PLAYER_ECONOMY_PROGRAM_ID

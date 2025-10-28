@@ -1,8 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::{
-    constants::*, errors::PlayerEconomyError, state::*,
-};
+use crate::{constants::*, errors::PlayerEconomyError, state::*};
 
 #[derive(Accounts)]
 pub struct InitializePlayerEconomy<'info> {

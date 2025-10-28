@@ -20,3 +20,7 @@ pub const PORTAL_NONE: u8 = u8::MAX;
 // Loot-only items (can only be found/looted, not brought to adventures)
 pub const ITEM_POUCH_GOLD: u8 = 0;
 pub const ITEM_MYSTERY_RELIC: u8 = 4;
+
+pub const POUCH_GOLD_VALUE: u64 = 25;
+pub const DUNGEON_FEE_BPS: u64 = 300; // 3%
+pub const BPS_DENOMINATOR: u64 = 10_000;

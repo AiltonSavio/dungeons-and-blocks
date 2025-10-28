@@ -54,4 +54,14 @@ pub enum AdventureError {
     ItemNotFound,
     #[msg("insufficient item quantity")]
     InsufficientItemQuantity,
+    #[msg("no chest available at this position")]
+    NoChestAtPosition,
+    #[msg("chest already opened")]
+    ChestAlreadyOpened,
+    #[msg("selected loot is not available")]
+    LootNotAvailable,
+    #[msg("dungeon owner economy account missing")]
+    DungeonOwnerEconomyMissing,
+    #[msg("dungeon account mismatch")]
+    InvalidDungeonAccount,
 }

@@ -20,16 +20,18 @@ pub(crate) use instructions::economy::{
     __cpi_client_accounts_spend_gold,
 };
 pub(crate) use instructions::items::{
-    __client_accounts_consume_items, __client_accounts_modify_item_stock,
+    __client_accounts_consume_items, __client_accounts_deposit_loot,
+    __client_accounts_modify_item_stock,
 };
 #[cfg(feature = "cpi")]
 pub(crate) use instructions::items::{
-    __cpi_client_accounts_consume_items, __cpi_client_accounts_modify_item_stock,
+    __cpi_client_accounts_consume_items, __cpi_client_accounts_deposit_loot,
+    __cpi_client_accounts_modify_item_stock,
 };
 
 pub use instructions::{
     economy::{GrantHourlyGold, InitializePlayerEconomy, SpendGold},
-    items::{ConsumeItems, ModifyItemStock},
+    items::{ConsumeItems, DepositLoot, ModifyItemStock},
 };
 
 declare_id!("8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ");
@@ -39,7 +41,7 @@ pub mod player_economy {
     use super::*;
     use instructions::{
         economy::{GrantHourlyGold, InitializePlayerEconomy, SpendGold},
-        items::{ConsumeItems, ModifyItemStock},
+        items::{ConsumeItems, DepositLoot, ModifyItemStock},
     };
 
     pub fn initialize_player_economy(ctx: Context<InitializePlayerEconomy>) -> Result<()> {
@@ -64,5 +66,13 @@ pub mod player_economy {
 
     pub fn consume_items(ctx: Context<ConsumeItems>, items: Vec<ItemConsumption>) -> Result<()> {
         instructions::items::consume_items(ctx, items)
+    }
+
+    pub fn deposit_loot(
+        ctx: Context<DepositLoot>,
+        gold: u64,
+        items: Vec<LootDepositItem>,
+    ) -> Result<()> {
+        instructions::items::deposit_loot(ctx, gold, items)
     }
 }

@@ -48,12 +48,7 @@ export const POSITIVE_TRAITS: TraitCatalogEntry[] = [
     "Shieldmaster",
     "Disciplined guard grants +10 defense and +4 resistance."
   ),
-  makeEntry(
-    4,
-    "positive",
-    "Fleetfoot",
-    "Relentless training adds +12 speed."
-  ),
+  makeEntry(4, "positive", "Fleetfoot", "Relentless training adds +12 speed."),
   makeEntry(
     5,
     "positive",
@@ -63,24 +58,9 @@ export const POSITIVE_TRAITS: TraitCatalogEntry[] = [
 ];
 
 export const NEGATIVE_TRAITS: TraitCatalogEntry[] = [
-  makeEntry(
-    0,
-    "negative",
-    "Frail",
-    "Lingering injuries reduce max HP by 12."
-  ),
-  makeEntry(
-    1,
-    "negative",
-    "Sluggish",
-    "A tired gait drags speed down by 12."
-  ),
-  makeEntry(
-    2,
-    "negative",
-    "Dull Edge",
-    "Neglected gear lowers attack by 8."
-  ),
+  makeEntry(0, "negative", "Frail", "Lingering injuries reduce max HP by 12."),
+  makeEntry(1, "negative", "Sluggish", "A tired gait drags speed down by 12."),
+  makeEntry(2, "negative", "Dull Edge", "Neglected gear lowers attack by 8."),
   makeEntry(
     3,
     "negative",
@@ -109,7 +89,5 @@ export function findTrait(
   id: number
 ): TraitCatalogEntry | undefined {
   if (id === TRAIT_NONE) return undefined;
-  return alignment === "positive"
-    ? positiveMap.get(id)
-    : negativeMap.get(id);
+  return alignment === "positive" ? positiveMap.get(id) : negativeMap.get(id);
 }

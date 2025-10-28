@@ -4,8 +4,10 @@ use hero_core::state::AdventureHeroStats;
 
 use crate::errors::AdventureError;
 use crate::instructions::support::{load_hero_lock, store_hero_lock};
-use crate::state::DungeonPoint;
+use crate::state::{DungeonPoint, ItemSlot};
 use crate::{constants::*, ExitAdventure};
+use player_economy::constants::{ITEM_COUNT as ECON_ITEM_COUNT, PLAYER_ECONOMY_SEED};
+use player_economy::state::{ItemKey, LootDepositItem, PlayerEconomy};
 
 pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info>>) -> Result<()> {
     let adventure_ref = &ctx.accounts.adventure;
@@ -43,7 +45,8 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
     // Process remaining accounts (hero unlock) only if provided
     // During delegated exit from ephemeral, these accounts are readonly/omitted
     // to avoid "undelegated writable account" errors
-    if ctx.remaining_accounts.len() >= hero_count * 2 {
+    let hero_accounts_provided = ctx.remaining_accounts.len() >= hero_count * 2;
+    if hero_accounts_provided {
         for (i, hero_mint) in hero_mints.iter().enumerate() {
             let hero_account_info = ctx.remaining_accounts[i * 2].clone();
             require_keys_eq!(
@@ -108,6 +111,143 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
         }
     }
 
+    // Gather loot to transfer back to the player economy
+    let mut total_gold: u64 = 0;
+    let mut item_totals = [0u32; ECON_ITEM_COUNT];
+    {
+        let adventure = &mut ctx.accounts.adventure;
+        for slot in adventure.items.iter_mut() {
+            if slot.is_empty() {
+                *slot = ItemSlot::empty();
+                continue;
+            }
+
+            if slot.item_key == ITEM_POUCH_GOLD {
+                let quantity = slot.quantity as u64;
+                total_gold = total_gold
+                    .checked_add(
+                        quantity
+                            .checked_mul(POUCH_GOLD_VALUE)
+                            .ok_or(AdventureError::ItemStackOverflow)?,
+                    )
+                    .ok_or(AdventureError::ItemStackOverflow)?;
+            } else if (slot.item_key as usize) < item_totals.len() {
+                item_totals[slot.item_key as usize] =
+                    item_totals[slot.item_key as usize].saturating_add(slot.quantity as u32);
+            }
+
+            *slot = ItemSlot::empty();
+        }
+        adventure.item_count = 0;
+    }
+
+    let mut item_deposits: Vec<LootDepositItem> = Vec::new();
+    for (index, total) in item_totals.iter().enumerate() {
+        if *total == 0 || index == ITEM_POUCH_GOLD as usize {
+            continue;
+        }
+
+        let item_key = match index as u8 {
+            1 => ItemKey::StressTonic,
+            2 => ItemKey::MinorTorch,
+            3 => ItemKey::HealingSalve,
+            4 => ItemKey::MysteryRelic,
+            5 => ItemKey::CalmingIncense,
+            6 => ItemKey::PhoenixFeather,
+            _ => continue,
+        };
+
+        let mut remaining = *total;
+        while remaining > 0 {
+            let chunk = remaining.min(u32::from(u16::MAX));
+            item_deposits.push(LootDepositItem {
+                item: item_key,
+                quantity: chunk as u16,
+            });
+            remaining -= chunk;
+        }
+    }
+
+    let dungeon_owner = ctx.accounts.dungeon.owner;
+    let mut fee = if total_gold == 0 {
+        0
+    } else {
+        ((total_gold as u128 * DUNGEON_FEE_BPS as u128) / BPS_DENOMINATOR as u128) as u64
+    };
+
+    if ctx.accounts.owner.key() == dungeon_owner {
+        fee = 0;
+    }
+
+    let player_gold = total_gold.saturating_sub(fee);
+
+    let adventure_signer_bump = ctx.accounts.adventure.bump;
+    let owner_key = ctx.accounts.owner.key();
+    let dungeon_key = ctx.accounts.dungeon.key();
+    let adventure_seeds = [
+        ADVENTURE_SEED,
+        owner_key.as_ref(),
+        dungeon_key.as_ref(),
+        &[adventure_signer_bump],
+    ];
+    let signer_seeds = &[&adventure_seeds[..]];
+
+    if player_gold > 0 || !item_deposits.is_empty() {
+        let deposit_accounts = player_economy::cpi::accounts::DepositLoot {
+            authority: ctx.accounts.adventure.to_account_info(),
+            player_economy: ctx.accounts.player_economy.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.player_economy_program.to_account_info(),
+            deposit_accounts,
+            signer_seeds,
+        );
+        player_economy::cpi::deposit_loot(cpi_ctx, player_gold, item_deposits)?;
+    }
+
+    if fee > 0 {
+        let owner_index = if hero_accounts_provided {
+            hero_count * 2
+        } else {
+            0
+        };
+        let owner_account_info = ctx
+            .remaining_accounts
+            .get(owner_index)
+            .ok_or(AdventureError::DungeonOwnerEconomyMissing)?
+            .clone();
+
+        let (expected_owner_pda, _) = Pubkey::find_program_address(
+            &[PLAYER_ECONOMY_SEED, dungeon_owner.as_ref()],
+            ctx.accounts.player_economy_program.key,
+        );
+
+        require_keys_eq!(
+            *owner_account_info.key,
+            expected_owner_pda,
+            AdventureError::DungeonOwnerEconomyMissing
+        );
+        require!(
+            owner_account_info.is_writable,
+            AdventureError::DungeonOwnerEconomyMissing
+        );
+        require!(
+            owner_account_info.data_len() >= PlayerEconomy::LEN,
+            AdventureError::DungeonOwnerEconomyMissing
+        );
+
+        let deposit_accounts = player_economy::cpi::accounts::DepositLoot {
+            authority: ctx.accounts.adventure.to_account_info(),
+            player_economy: owner_account_info,
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.player_economy_program.to_account_info(),
+            deposit_accounts,
+            signer_seeds,
+        );
+        player_economy::cpi::deposit_loot(cpi_ctx, fee, Vec::<LootDepositItem>::new())?;
+    }
+
     {
         let adventure = &mut ctx.accounts.adventure;
         if portal_index < adventure.used_portals.len() {
@@ -119,6 +259,12 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
         adventure.is_active = false;
         adventure.heroes_inside = false;
         adventure.last_crew_timestamp = now;
+        adventure
+            .pending_loot
+            .iter_mut()
+            .for_each(|slot| *slot = ItemSlot::empty());
+        adventure.pending_loot_count = 0;
+        adventure.pending_loot_source = u8::MAX;
     }
 
     Ok(())

@@ -20,6 +20,9 @@ pub struct AdventureSession {
     pub party_position: DungeonPoint,
     pub item_count: u8,
     pub items: [ItemSlot; MAX_ITEMS],
+    pub pending_loot_count: u8,
+    pub pending_loot_source: u8,
+    pub pending_loot: [ItemSlot; MAX_ITEMS],
     pub delegate: Option<Pubkey>,
     pub grid: Vec<u8>,
     pub rooms: Vec<DungeonRoom>,
@@ -64,6 +67,9 @@ impl AdventureSession {
             + (32 * MAX_PARTY)
             + hero_snapshot_space
             + DungeonPoint::SIZE
+            + 1
+            + (ItemSlot::SIZE * MAX_ITEMS)
+            + 1
             + 1
             + (ItemSlot::SIZE * MAX_ITEMS)
             + 33

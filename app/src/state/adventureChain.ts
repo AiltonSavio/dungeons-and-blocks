@@ -61,6 +61,9 @@ export type ChainAdventure = {
   partyPosition: { x: number; y: number };
   itemCount: number;
   items: ItemSlot[];
+  pendingLootCount: number;
+  pendingLootSource: number;
+  pendingLoot: ItemSlot[];
   delegate: string | null;
   grid: number[];
   rooms: { x: number; y: number; w: number; h: number }[];
@@ -290,6 +293,11 @@ export function mapAdventureAccount(
     quantity: Number(item.quantity),
   }));
 
+  const pendingLoot: ItemSlot[] = account.pendingLoot.map((item) => ({
+    itemKey: Number(item.itemKey),
+    quantity: Number(item.quantity),
+  }));
+
   const openedChests = Array.from(account.openedChests).map(Number);
   const usedPortals = Array.from(account.usedPortals).map(Number);
 
@@ -322,6 +330,9 @@ export function mapAdventureAccount(
     partyPosition,
     itemCount: Number(account.itemCount),
     items,
+    pendingLootCount: Number(account.pendingLootCount),
+    pendingLootSource: Number(account.pendingLootSource),
+    pendingLoot,
     delegate: account.delegate ? account.delegate.toBase58() : null,
     grid: Array.from(account.grid).map(Number),
     rooms,
@@ -575,9 +586,19 @@ export async function createExitAdventureInstruction(options: {
   authority: PublicKey;
   adventurePda: PublicKey;
   heroMints: PublicKey[];
+  dungeonMint: PublicKey;
+  dungeonOwner: PublicKey;
   fromEphemeral?: boolean;
 }): Promise<TransactionInstruction> {
-  const { connection, owner, authority, adventurePda, heroMints } = options;
+  const {
+    connection,
+    owner,
+    authority,
+    adventurePda,
+    heroMints,
+    dungeonMint,
+    dungeonOwner,
+  } = options;
   const program = getAdventureProgram(connection, owner);
 
   const sortedHeroMints = [...heroMints].sort((a, b) => {
@@ -585,6 +606,16 @@ export async function createExitAdventureInstruction(options: {
     const bBytes = b.toBuffer();
     return aBytes.compare(bBytes);
   });
+
+  const [playerEconomyPda] = PublicKey.findProgramAddressSync(
+    [PLAYER_ECONOMY_SEED, owner.toBuffer()],
+    PLAYER_ECONOMY_PROGRAM_ID
+  );
+
+  const [dungeonOwnerEconomyPda] = PublicKey.findProgramAddressSync(
+    [PLAYER_ECONOMY_SEED, dungeonOwner.toBuffer()],
+    PLAYER_ECONOMY_PROGRAM_ID
+  );
 
   // Always pass hero accounts to unlock them via CPI to hero-core
   const remainingAccounts = sortedHeroMints.flatMap((heroMint) => {
@@ -595,6 +626,12 @@ export async function createExitAdventureInstruction(options: {
     ];
   });
 
+  remainingAccounts.push({
+    pubkey: dungeonOwnerEconomyPda,
+    isSigner: false,
+    isWritable: true,
+  });
+
   const instruction = await program.methods
     .exitAdventure()
     .accountsPartial({
@@ -602,8 +639,118 @@ export async function createExitAdventureInstruction(options: {
       authority,
       adventure: adventurePda,
       heroProgram: HERO_CORE_PROGRAM_ID,
+      dungeon: dungeonMint,
+      playerEconomy: playerEconomyPda,
+      playerEconomyProgram: PLAYER_ECONOMY_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .remainingAccounts(remainingAccounts)
+    .instruction();
+
+  return instruction;
+}
+
+// ---------- Loot & Inventory ----------
+
+export async function createOpenChestInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventurePda: PublicKey;
+  chestIndex: number;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventurePda, chestIndex } = options;
+  const program = getAdventureProgram(connection, owner);
+
+  const instruction = await program.methods
+    .openChest(chestIndex)
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventurePda,
+    })
+    .instruction();
+
+  return instruction;
+}
+
+export async function createPickupItemInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventurePda: PublicKey;
+  itemKey: number;
+  quantity: number;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventurePda, itemKey, quantity } =
+    options;
+  const program = getAdventureProgram(connection, owner);
+
+  const instruction = await program.methods
+    .pickupItem(itemKey, quantity)
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventurePda,
+    })
+    .instruction();
+
+  return instruction;
+}
+
+export async function createDropItemInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventurePda: PublicKey;
+  itemKey: number;
+  quantity: number;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventurePda, itemKey, quantity } =
+    options;
+  const program = getAdventureProgram(connection, owner);
+
+  const instruction = await program.methods
+    .dropItem(itemKey, quantity)
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventurePda,
+    })
+    .instruction();
+
+  return instruction;
+}
+
+export async function createSwapItemInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventurePda: PublicKey;
+  dropItemKey: number;
+  dropQuantity: number;
+  pickupItemKey: number;
+  pickupQuantity: number;
+}): Promise<TransactionInstruction> {
+  const {
+    connection,
+    owner,
+    authority,
+    adventurePda,
+    dropItemKey,
+    dropQuantity,
+    pickupItemKey,
+    pickupQuantity,
+  } = options;
+  const program = getAdventureProgram(connection, owner);
+
+  const instruction = await program.methods
+    .swapItem(dropItemKey, dropQuantity, pickupItemKey, pickupQuantity)
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventurePda,
+    })
     .instruction();
 
   return instruction;

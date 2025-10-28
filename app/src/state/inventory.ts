@@ -68,14 +68,20 @@ export class Inventory {
    */
   addItem(id: ItemId, quantity = 1): boolean {
     const def = resolveItem(id);
-    const stackable = (def.maxStack ?? 1) > 1;
+    const maxStackRaw = def.maxStack;
+    const calculatedMaxStack =
+      maxStackRaw === undefined
+        ? 1
+        : maxStackRaw === 0
+        ? Number.MAX_SAFE_INTEGER
+        : maxStackRaw;
+    const stackable = calculatedMaxStack > 1;
     let remaining = quantity;
 
     if (stackable) {
       for (const slot of this.slots) {
         if (slot && slot.def.id === id) {
-          const maxStack = def.maxStack ?? Infinity;
-          const available = Math.max(0, maxStack - slot.quantity);
+          const available = Math.max(0, calculatedMaxStack - slot.quantity);
           const transfer = Math.min(available, remaining);
           slot.quantity += transfer;
           remaining -= transfer;
@@ -87,9 +93,7 @@ export class Inventory {
     while (remaining > 0) {
       const target = this.slots.findIndex((s) => s === null);
       if (target === -1) return false;
-      const transfer = stackable
-        ? Math.min(def.maxStack ?? remaining, remaining)
-        : 1;
+      const transfer = stackable ? Math.min(calculatedMaxStack, remaining) : 1;
       this.slots[target] = {
         def,
         quantity: transfer,

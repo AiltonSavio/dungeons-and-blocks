@@ -2252,7 +2252,9 @@ export class TownScene extends Phaser.Scene {
             0,
             yPos,
             activeStatuses.length > 0
-              ? `Status Effects: ${activeStatuses.map((i) => statusNames[i]).join(", ")}`
+              ? `Status Effects: ${activeStatuses
+                  .map((i) => statusNames[i])
+                  .join(", ")}`
               : "No active status effects.",
             {
               ...UI_FONT.caption,
@@ -2283,7 +2285,9 @@ export class TownScene extends Phaser.Scene {
         }
 
         // Negative traits section
-        const negativeTraits = hero.negativeQuirks.map((id) => getQuirkLabel(id));
+        const negativeTraits = hero.negativeQuirks.map((id) =>
+          getQuirkLabel(id)
+        );
         const traitsText = this.add
           .text(
             0,
@@ -2310,7 +2314,9 @@ export class TownScene extends Phaser.Scene {
               idx * 150,
               yPos,
               140,
-              `Cure ${getQuirkLabel(traitId)} (${HERO_SANITARIUM_TRAIT_CURE_COST}g)`,
+              `Cure ${getQuirkLabel(
+                traitId
+              )} (${HERO_SANITARIUM_TRAIT_CURE_COST}g)`,
               () => this.cureNegativeTrait(hero, idx),
               !locked && !this.programBusy
             );
@@ -2396,9 +2402,10 @@ export class TownScene extends Phaser.Scene {
             `Rerolls used: ${hero.rerollCount}/${HERO_BLACKSMITH_MAX_REROLLS}`,
             {
               ...UI_FONT.caption,
-              color: hero.rerollCount >= HERO_BLACKSMITH_MAX_REROLLS
-                ? "#ff9c9c"
-                : "#9fa6c0",
+              color:
+                hero.rerollCount >= HERO_BLACKSMITH_MAX_REROLLS
+                  ? "#ff9c9c"
+                  : "#9fa6c0",
             }
           )
           .setOrigin(0, 0);
@@ -2656,7 +2663,9 @@ export class TownScene extends Phaser.Scene {
           .text(
             0,
             header.height + 4,
-            `Stress ${hero.stress}/${hero.stressMax} • Blessed: ${hero.blessed ? "Yes" : "No"}`,
+            `Stress ${hero.stress}/${hero.stressMax} • Blessed: ${
+              hero.blessed ? "Yes" : "No"
+            }`,
             {
               ...UI_FONT.caption,
               color: hero.stress > 0 ? "#ffe28a" : "#98d1ff",

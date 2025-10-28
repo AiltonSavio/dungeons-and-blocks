@@ -1,9 +1,7 @@
 use anchor_lang::prelude::*;
 use dungeon_nft::state::DungeonMint;
 
-use crate::{
-    constants::ADVENTURE_SEED, errors::AdventureError, state::AdventureSession,
-};
+use crate::{constants::ADVENTURE_SEED, errors::AdventureError, state::AdventureSession};
 
 pub mod constants;
 pub mod errors;
@@ -126,19 +124,55 @@ pub struct ExitAdventure<'info> {
     pub adventure: Account<'info, AdventureSession>,
     /// CHECK: hero-core program for CPI calls
     pub hero_program: Program<'info, hero_core::program::HeroCore>,
+    #[account(
+        constraint = adventure.dungeon_mint == dungeon.key() @ AdventureError::InvalidDungeonAccount
+    )]
+    pub dungeon: Account<'info, DungeonMint>,
+    #[account(
+        mut,
+        seeds = [player_economy::PLAYER_ECONOMY_SEED, owner.key().as_ref()],
+        bump = player_economy.bump,
+        seeds::program = player_economy_program.key()
+    )]
+    pub player_economy: Account<'info, player_economy::PlayerEconomy>,
+    pub player_economy_program: Program<'info, player_economy::program::PlayerEconomy>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct ManageItems<'info> {
-    pub player: Signer<'info>,
+    /// CHECK: The owner of the adventure session (used for PDA derivation)
+    pub owner: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
     #[account(
         mut,
         seeds = [
             ADVENTURE_SEED,
-            player.key().as_ref(),
+            owner.key().as_ref(),
             adventure.dungeon_mint.as_ref()
         ],
-        bump = adventure.bump
+        bump = adventure.bump,
+        constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch
+    )]
+    pub adventure: Account<'info, AdventureSession>,
+}
+
+#[derive(Accounts)]
+pub struct OpenChest<'info> {
+    /// CHECK: The owner of the adventure session (used for PDA derivation)
+    pub owner: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [
+            ADVENTURE_SEED,
+            owner.key().as_ref(),
+            adventure.dungeon_mint.as_ref()
+        ],
+        bump = adventure.bump,
+        constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch
     )]
     pub adventure: Account<'info, AdventureSession>,
 }
@@ -191,6 +225,10 @@ pub mod adventure_engine {
             pickup_item_key,
             pickup_quantity,
         )
+    }
+
+    pub fn open_chest(ctx: Context<OpenChest>, chest_index: u8) -> Result<()> {
+        crate::instructions::loot::open_chest(ctx, chest_index)
     }
 
     pub fn exit_adventure<'info>(

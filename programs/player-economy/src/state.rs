@@ -70,6 +70,12 @@ pub struct ItemConsumption {
     pub quantity: u16,
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug)]
+pub struct LootDepositItem {
+    pub item: ItemKey,
+    pub quantity: u16,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum ItemKey {

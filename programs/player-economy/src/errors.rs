@@ -26,4 +26,6 @@ pub enum PlayerEconomyError {
     GrantOnCooldown,
     #[msg("Inventory quantity too large")]
     InventoryOverflow,
+    #[msg("Player economy account is not initialized")]
+    AccountNotInitialized,
 }

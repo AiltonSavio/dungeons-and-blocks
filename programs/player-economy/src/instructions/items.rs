@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::PLAYER_ECONOMY_SEED, errors::PlayerEconomyError, state::*,
+    constants::{ADVENTURE_ENGINE_PROGRAM_ID, PLAYER_ECONOMY_SEED},
+    errors::PlayerEconomyError,
+    state::*,
 };
 
 #[derive(Accounts)]
@@ -19,6 +21,18 @@ pub struct ModifyItemStock<'info> {
 #[derive(Accounts)]
 pub struct ConsumeItems<'info> {
     /// The authority (owner or delegated program) consuming items
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [PLAYER_ECONOMY_SEED, player_economy.owner.as_ref()],
+        bump = player_economy.bump
+    )]
+    pub player_economy: Account<'info, PlayerEconomy>,
+}
+
+#[derive(Accounts)]
+pub struct DepositLoot<'info> {
+    /// Authority adding loot (player or trusted adventure signer)
     pub authority: Signer<'info>,
     #[account(
         mut,
@@ -123,11 +137,7 @@ pub fn consume_items(ctx: Context<ConsumeItems>, items: Vec<ItemConsumption>) ->
     let account = &mut ctx.accounts.player_economy;
     let authority = ctx.accounts.authority.key();
 
-    require_keys_eq!(
-        account.owner,
-        authority,
-        PlayerEconomyError::Unauthorized
-    );
+    require_keys_eq!(account.owner, authority, PlayerEconomyError::Unauthorized);
 
     // First pass: validate all items are available
     for item_consumption in &items {
@@ -157,4 +167,68 @@ pub fn consume_items(ctx: Context<ConsumeItems>, items: Vec<ItemConsumption>) ->
     }
 
     Ok(())
+}
+
+pub fn deposit_loot(
+    ctx: Context<DepositLoot>,
+    gold: u64,
+    items: Vec<LootDepositItem>,
+) -> Result<()> {
+    let authority = ctx.accounts.authority.key();
+    let authority_is_owner = authority == ctx.accounts.player_economy.owner;
+    let authority_is_adventure = *ctx.accounts.authority.owner == ADVENTURE_ENGINE_PROGRAM_ID;
+
+    require!(
+        authority_is_owner || authority_is_adventure,
+        PlayerEconomyError::Unauthorized
+    );
+
+    require!(
+        ctx.accounts.player_economy.to_account_info().data_len() >= PlayerEconomy::LEN,
+        PlayerEconomyError::AccountNotInitialized
+    );
+
+    let account = &mut ctx.accounts.player_economy;
+
+    if gold > 0 {
+        account.gold = account
+            .gold
+            .checked_add(gold)
+            .ok_or(PlayerEconomyError::MathOverflow)?;
+    }
+
+    for deposit in items {
+        if deposit.quantity == 0 {
+            continue;
+        }
+
+        let definition = deposit.item.definition();
+        let index = deposit.item.index();
+        let current = account.items[index];
+        let new_total = current
+            .checked_add(deposit.quantity)
+            .ok_or(PlayerEconomyError::InventoryOverflow)?;
+
+        if definition.max_stack > 0 {
+            require!(
+                new_total as u64 <= definition.max_stack as u64,
+                PlayerEconomyError::StackLimitExceeded
+            );
+        }
+
+        account.items[index] = new_total;
+    }
+
+    emit!(LootDeposited {
+        owner: account.owner,
+        gold,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct LootDeposited {
+    pub owner: Pubkey,
+    pub gold: u64,
 }

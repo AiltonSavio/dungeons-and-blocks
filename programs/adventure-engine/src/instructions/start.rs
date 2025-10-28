@@ -122,7 +122,9 @@ pub fn start_adventure<'info>(
 
         if needs_init {
             // Close old account if it exists with wrong size
-            if lock_account_info.data_len() > 0 && lock_account_info.data_len() != HeroAdventureLock::LEN {
+            if lock_account_info.data_len() > 0
+                && lock_account_info.data_len() != HeroAdventureLock::LEN
+            {
                 let dest = ctx.accounts.player.to_account_info();
                 let lock_lamports = lock_account_info.lamports();
                 **dest.lamports.borrow_mut() = dest.lamports().checked_add(lock_lamports).unwrap();
@@ -335,6 +337,12 @@ pub fn start_adventure<'info>(
         adventure.hero_count = sorted_unique.len() as u8;
         adventure.item_count = items_count;
         adventure.items = item_array;
+        adventure
+            .pending_loot
+            .iter_mut()
+            .for_each(|slot| *slot = ItemSlot::empty());
+        adventure.pending_loot_count = 0;
+        adventure.pending_loot_source = u8::MAX;
         adventure.is_active = true;
         adventure.heroes_inside = true;
         adventure.last_started_at = now;

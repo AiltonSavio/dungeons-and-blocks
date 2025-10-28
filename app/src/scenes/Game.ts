@@ -4,6 +4,7 @@ import {
   Keypair,
   PublicKey,
   Transaction,
+  TransactionInstruction,
   clusterApiUrl,
 } from "@solana/web3.js";
 import {
@@ -18,12 +19,15 @@ import { ChainDungeon, fetchDungeonByAddress } from "../state/dungeonChain";
 import {
   ChainAdventure,
   ChainHeroSnapshot,
+  TRAIT_NONE,
+  createExitAdventureInstruction,
   createMoveHeroInstruction,
+  createOpenChestInstruction,
+  createPickupItemInstruction,
+  createDropItemInstruction,
+  deriveAdventurePda,
   directionFromDelta,
   fetchAdventureSessionSmart,
-  deriveAdventurePda,
-  createExitAdventureInstruction,
-  TRAIT_NONE,
   type AdventureDirection,
 } from "../state/adventureChain";
 import { findTrait } from "../state/traitCatalog";
@@ -36,7 +40,15 @@ import {
   ITEM_KEY_TO_ID,
   ITEM_SLOT_EMPTY,
   SupplySlot,
+  type ItemId,
 } from "../state/items";
+import { Inventory, type InventorySnapshot } from "../state/inventory";
+import {
+  ChestLootModal,
+  type ChestLootRow,
+  type ChestInventoryRow,
+  type ChestLootSelection,
+} from "../ui/chestLootModal";
 
 enum Tile {
   Floor = 0,
@@ -67,6 +79,7 @@ type PartyMember = {
 };
 
 type Chest = {
+  index: number;
   tileX: number;
   tileY: number;
   sprite: Phaser.GameObjects.Image;
@@ -149,6 +162,14 @@ export default class Game extends Phaser.Scene {
   private minimap!: MinimapController;
   private chests: Chest[] = [];
   private portals: Portal[] = [];
+  private chestModal?: ChestLootModal;
+  private processingChest = false;
+  private lastChestModalDismissed = 0;
+  private lastChestLootSource = 255;
+  private readonly chestModalCooldownMs = 800;
+  private activeChestIndex: number | null = null;
+  private dismissedChestIndex: number | null = null;
+  private dismissedChestTile?: { x: number; y: number };
 
   // Portal modal
   private portalModalOverlay?: Phaser.GameObjects.Rectangle;
@@ -396,6 +417,8 @@ export default class Game extends Phaser.Scene {
       this.setInventory(hudItems);
     }
 
+    this.syncInventoryFromAdventure();
+
     // Setup party
     this.radius = (this.tileSize - 4) * 0.5;
     this.pxSpeed = this.speed * this.tileSize;
@@ -518,7 +541,9 @@ export default class Game extends Phaser.Scene {
     // 2. Portal modal is open
     const blockMovement =
       (this.isNearInteractable && this.movementQueue.length > 0) ||
-      !!this.portalModalOverlay;
+      !!this.portalModalOverlay ||
+      !!this.chestModal ||
+      this.processingChest;
 
     // Input direction
     const dir = new Phaser.Math.Vector2(
@@ -578,6 +603,15 @@ export default class Game extends Phaser.Scene {
         if (direction && this.adventurePda && this.playerPublicKey) {
           this.queueMovement(direction, { x: tx, y: ty });
         }
+      }
+
+      if (
+        this.dismissedChestIndex !== null &&
+        this.dismissedChestTile &&
+        (this.dismissedChestTile.x !== tx || this.dismissedChestTile.y !== ty)
+      ) {
+        this.dismissedChestIndex = null;
+        this.dismissedChestTile = undefined;
       }
     }
 
@@ -979,6 +1013,7 @@ export default class Game extends Phaser.Scene {
       }
 
       this.chests.push({
+        index,
         tileX: tile.x,
         tileY: tile.y,
         sprite,
@@ -1016,32 +1051,442 @@ export default class Game extends Phaser.Scene {
 
   private checkChestProximity() {
     const leader = this.party[0];
+    const pendingSource = this.adventureSession?.pendingLootSource ?? 255;
+    const pendingCount = this.adventureSession?.pendingLootCount ?? 0;
+    const leaderTileX = Math.floor(leader.x / this.tileSize);
+    const leaderTileY = Math.floor(leader.y / this.tileSize);
+
     this.chests.forEach((chest) => {
-      if (chest.opened) return;
-      const dx = leader.x - chest.sprite.x;
-      const dy = leader.y - chest.sprite.y;
-      const distSq = dx * dx + dy * dy;
-      if (distSq <= this.tileSize * this.tileSize * 1.2) {
+      const hasPendingForChest =
+        pendingCount > 0 &&
+        pendingSource !== 255 &&
+        pendingSource === chest.index;
+      const now = performance.now();
+      const recentlyDismissed =
+        hasPendingForChest &&
+        this.lastChestLootSource === chest.index &&
+        now - this.lastChestModalDismissed < this.chestModalCooldownMs;
+      const dismissedAndStationary =
+        hasPendingForChest &&
+        this.dismissedChestIndex === chest.index &&
+        this.dismissedChestTile &&
+        this.dismissedChestTile.x === leaderTileX &&
+        this.dismissedChestTile.y === leaderTileY;
+
+      const isOnChest =
+        leaderTileX === chest.tileX && leaderTileY === chest.tileY;
+
+      if (chest.opened) {
+        if (
+          hasPendingForChest &&
+          !this.chestModal &&
+          !recentlyDismissed &&
+          !dismissedAndStationary &&
+          isOnChest
+        ) {
+          if (this.adventureSession) {
+            this.showChestLootModal(this.adventureSession);
+          }
+        }
+        return;
+      }
+
+      if (!isOnChest) {
+        return;
+      }
+
+      if (dismissedAndStationary || recentlyDismissed) {
+        return;
+      }
+
+      if (!this.processingChest && !this.chestModal) {
         this.openChest(chest);
       }
     });
   }
 
   private openChest(chest: Chest) {
-    if (chest.opened) return;
-    chest.opened = true;
-    chest.sprite.setTexture("loot_chest_02");
-    this.time.delayedCall(200, () => chest.sprite.setTexture("loot_chest_03"));
+    if (chest.opened || this.processingChest) return;
+    this.processingChest = true;
+    void this.handleChestOpen(chest).finally(() => {
+      this.processingChest = false;
+    });
+  }
 
-    // Mark on minimap
-    this.minimap.markChestOpened(chest.tileX, chest.tileY);
+  private async handleChestOpen(chest: Chest) {
+    try {
+      const success = await this.tryOpenChestOnChain(chest);
+      if (success) {
+        chest.opened = true;
+        chest.sprite.setTexture("loot_chest_02");
+        this.time.delayedCall(200, () =>
+          chest.sprite.setTexture("loot_chest_03")
+        );
+        this.minimap.markChestOpened(chest.tileX, chest.tileY);
+        console.log(`[Game] Opened chest at (${chest.tileX}, ${chest.tileY})`);
+      } else {
+        chest.sprite.setTexture("loot_chest_01");
+      }
+    } catch (err) {
+      console.error("[Game] Failed to open chest:", err);
+      chest.sprite.setTexture("loot_chest_01");
+    }
+  }
 
-    console.log(`[Game] Opened chest at (${chest.tileX}, ${chest.tileY})`);
+  private async tryOpenChestOnChain(chest: Chest): Promise<boolean> {
+    if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair)
+      return false;
+    const connection = this.getSolanaConnection();
+    if (!connection) return false;
+
+    try {
+      const ix = await createOpenChestInstruction({
+        connection,
+        owner: this.playerPublicKey,
+        authority: this.tempKeypair.publicKey,
+        adventurePda: this.adventurePda,
+        chestIndex: chest.index,
+      });
+
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("confirmed");
+      const tx = new Transaction();
+      tx.feePayer = this.tempKeypair.publicKey;
+      tx.recentBlockhash = blockhash;
+      tx.add(ix);
+      tx.sign(this.tempKeypair);
+
+      const signature = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: false,
+      });
+
+      await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      const updated = await fetchAdventureSessionSmart(
+        connection,
+        null,
+        this.adventurePda
+      );
+
+      if (updated) {
+        this.adventureSession = updated;
+        this.rebuildHeroHud();
+        this.syncInventoryFromAdventure();
+        this.showChestLootModal(updated);
+      }
+
+      return true;
+    } catch (err) {
+      console.error("[Game] Chest transaction failed:", err);
+      return false;
+    }
+  }
+
+  private showChestLootModal(session: ChainAdventure) {
+    if (this.chestModal) {
+      this.closeChestModal();
+    }
+
+    if (
+      !session ||
+      session.pendingLootCount <= 0 ||
+      session.pendingLootSource === 255
+    ) {
+      return;
+    }
+
+    this.lastChestLootSource = session.pendingLootSource;
+    this.activeChestIndex = session.pendingLootSource;
+    this.dismissedChestIndex = null;
+    this.dismissedChestTile = undefined;
+    this.movementQueue = [];
+    this.movementBusy = false;
+
+    const lootRows = this.buildLootRows(session.pendingLoot ?? []);
+    if (lootRows.length === 0) {
+      this.activeChestIndex = null;
+      return;
+    }
+
+    const inventoryRows = this.buildInventoryRows(session.items ?? []);
+
+    this.chestModal = new ChestLootModal(this, lootRows, inventoryRows, {
+      onConfirm: (selection) => this.handleLootSelection(selection),
+      onPickAll: () => this.handlePickAllLoot(),
+      onClose: () => this.closeChestModal(),
+    });
+    this.chestModal.show();
+  }
+
+  private closeChestModal() {
+    this.chestModal?.destroy();
+    this.chestModal = undefined;
+    this.lastChestModalDismissed = performance.now();
+    this.lastChestLootSource = this.adventureSession?.pendingLootSource ?? 255;
+    if (this.activeChestIndex !== null) {
+      this.dismissedChestIndex = this.activeChestIndex;
+      const chestRef = this.chests.find(
+        (c) => c.index === this.activeChestIndex
+      );
+      if (chestRef) {
+        this.dismissedChestTile = { x: chestRef.tileX, y: chestRef.tileY };
+      } else if (this.optimisticTile) {
+        this.dismissedChestTile = { ...this.optimisticTile };
+      }
+    }
+    this.activeChestIndex = null;
+    if ((this.adventureSession?.pendingLootCount ?? 0) === 0) {
+      this.dismissedChestIndex = null;
+      this.dismissedChestTile = undefined;
+    }
+  }
+
+  private buildLootRows(
+    pending: { itemKey: number; quantity: number }[]
+  ): ChestLootRow[] {
+    return pending
+      .map((slot, index) => {
+        if (!slot || slot.quantity <= 0 || slot.itemKey === ITEM_SLOT_EMPTY) {
+          return null;
+        }
+        const id = ITEM_KEY_TO_ID[slot.itemKey] as ItemId | undefined;
+        if (!id) return null;
+        const def = ITEM_DEFINITIONS[id];
+        const label = `${def.name} × ${slot.quantity}`;
+        return {
+          slotIndex: index,
+          itemKey: slot.itemKey,
+          quantity: slot.quantity,
+          label,
+        } as ChestLootRow;
+      })
+      .filter((row): row is ChestLootRow => !!row);
+  }
+
+  private buildInventoryRows(
+    items: { itemKey: number; quantity: number }[]
+  ): ChestInventoryRow[] {
+    return items
+      .map((slot, index) => {
+        if (!slot || slot.quantity <= 0 || slot.itemKey === ITEM_SLOT_EMPTY) {
+          return null;
+        }
+        const id = ITEM_KEY_TO_ID[slot.itemKey] as ItemId | undefined;
+        if (!id) return null;
+        const def = ITEM_DEFINITIONS[id];
+        const label = `Drop ${def.name} × ${slot.quantity}`;
+        return {
+          slotIndex: index,
+          itemKey: slot.itemKey,
+          quantity: slot.quantity,
+          label,
+        } as ChestInventoryRow;
+      })
+      .filter((row): row is ChestInventoryRow => !!row);
+  }
+
+  private buildInventorySnapshot(
+    items: { itemKey: number; quantity: number }[]
+  ): InventorySnapshot {
+    const slots = Array.from({ length: this.INVENTORY_SLOTS }, (_, idx) => {
+      const slot = items[idx];
+      if (!slot || slot.quantity <= 0 || slot.itemKey === ITEM_SLOT_EMPTY)
+        return null;
+      const id = ITEM_KEY_TO_ID[slot.itemKey] as ItemId | undefined;
+      if (!id) return null;
+      const def = ITEM_DEFINITIONS[id];
+      return { def, quantity: slot.quantity };
+    });
+
+    return {
+      slots,
+      capacity: this.INVENTORY_SLOTS,
+      gold: 0,
+    } as InventorySnapshot;
+  }
+
+  private validateLootSelection(selection: ChestLootSelection): {
+    success: boolean;
+    error?: string;
+  } {
+    if (!this.adventureSession) {
+      return { success: false, error: "Adventure not ready." };
+    }
+
+    if (selection.take.length === 0 && selection.drop.length === 0) {
+      return { success: true };
+    }
+
+    const pending = this.adventureSession.pendingLoot ?? [];
+    for (const take of selection.take) {
+      const slot = pending[take.slotIndex];
+      if (
+        !slot ||
+        slot.itemKey !== take.itemKey ||
+        slot.quantity < take.quantity
+      ) {
+        return { success: false, error: "Chest contents changed." };
+      }
+    }
+
+    const inventorySnapshot = this.buildInventorySnapshot(
+      this.adventureSession.items ?? []
+    );
+    const inventory = new Inventory(this.INVENTORY_SLOTS);
+    inventory.fromSnapshot(inventorySnapshot);
+
+    for (const drop of selection.drop) {
+      const currentSlot = this.adventureSession.items?.[drop.slotIndex];
+      if (!currentSlot || currentSlot.itemKey !== drop.itemKey) {
+        return { success: false, error: "Inventory changed." };
+      }
+      if (currentSlot.quantity !== drop.quantity) {
+        return { success: false, error: "Inventory changed." };
+      }
+      const removed = inventory.removeSlot(drop.slotIndex);
+      if (!removed) {
+        return { success: false, error: "Unable to drop that item." };
+      }
+    }
+
+    for (const take of selection.take) {
+      const id = ITEM_KEY_TO_ID[take.itemKey] as ItemId | undefined;
+      if (!id) {
+        return { success: false, error: "Unknown loot item." };
+      }
+      const added = inventory.addItem(id, take.quantity);
+      if (!added) {
+        return {
+          success: false,
+          error: "Not enough space to carry that loot.",
+        };
+      }
+    }
+
+    return { success: true };
+  }
+
+  private async handleLootSelection(
+    selection: ChestLootSelection
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair) {
+      return { success: false, error: "Adventure not ready." };
+    }
+
+    if (selection.take.length === 0 && selection.drop.length === 0) {
+      return { success: true };
+    }
+
+    const validation = this.validateLootSelection(selection);
+    if (!validation.success) {
+      return validation;
+    }
+
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      return { success: false, error: "Connection unavailable." };
+    }
+
+    try {
+      const instructions = [] as TransactionInstruction[];
+
+      for (const drop of selection.drop) {
+        if (drop.quantity <= 0) continue;
+        const ix = await createDropItemInstruction({
+          connection,
+          owner: this.playerPublicKey,
+          authority: this.tempKeypair.publicKey,
+          adventurePda: this.adventurePda,
+          itemKey: drop.itemKey,
+          quantity: drop.quantity,
+        });
+        instructions.push(ix);
+      }
+
+      for (const take of selection.take) {
+        if (take.quantity <= 0) continue;
+        const ix = await createPickupItemInstruction({
+          connection,
+          owner: this.playerPublicKey,
+          authority: this.tempKeypair.publicKey,
+          adventurePda: this.adventurePda,
+          itemKey: take.itemKey,
+          quantity: take.quantity,
+        });
+        instructions.push(ix);
+      }
+
+      if (instructions.length === 0) {
+        return { success: true };
+      }
+
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("confirmed");
+      const tx = new Transaction();
+      tx.feePayer = this.tempKeypair.publicKey;
+      tx.recentBlockhash = blockhash;
+      instructions.forEach((ix) => tx.add(ix));
+      tx.sign(this.tempKeypair);
+
+      const signature = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: false,
+      });
+
+      await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      const updated = await fetchAdventureSessionSmart(
+        connection,
+        null,
+        this.adventurePda
+      );
+
+      if (updated) {
+        this.adventureSession = updated;
+        this.rebuildHeroHud();
+        this.syncInventoryFromAdventure();
+      }
+
+      return { success: true };
+    } catch (err) {
+      console.error("[Game] Failed to process loot selection:", err);
+      return { success: false, error: "Failed to process selection." };
+    }
+  }
+
+  private async handlePickAllLoot(): Promise<{
+    success: boolean;
+    error?: string;
+  }> {
+    if (!this.adventureSession) {
+      return { success: false, error: "Adventure not ready." };
+    }
+    const take = this.buildLootRows(
+      this.adventureSession.pendingLoot ?? []
+    ).map((row) => ({
+      slotIndex: row.slotIndex,
+      itemKey: row.itemKey,
+      quantity: row.quantity,
+    }));
+    const selection: ChestLootSelection = { take, drop: [] };
+    return this.handleLootSelection(selection);
   }
 
   private checkPortalProximity() {
     // Don't check if modal is already open or currently exiting
-    if (this.portalModalOverlay || this.isExitingDungeon) return;
+    if (
+      this.portalModalOverlay ||
+      this.isExitingDungeon ||
+      this.chestModal ||
+      this.processingChest
+    ) {
+      return;
+    }
 
     if (this.movementQueue.length > 0) return; // Wait for queue to finish
 
@@ -1083,6 +1528,8 @@ export default class Game extends Phaser.Scene {
     if (this.isExitingDungeon || this.portalModalOverlay) return;
 
     this.currentPortalForExit = portal;
+    this.movementQueue = [];
+    this.movementBusy = false;
 
     // Create overlay
     const uiW = this.uiCam?.width ?? this.scale.width;
@@ -1284,12 +1731,17 @@ export default class Game extends Phaser.Scene {
           heroMints.map((m) => m.toBase58())
         );
 
+        const dungeonMintPk = new PublicKey(this.adventureSession.dungeonMint);
+        const dungeonOwnerPk = await this.resolveDungeonOwner(connection);
+
         const ix = await createExitAdventureInstruction({
           connection,
           owner: this.playerPublicKey,
           authority: walletPubkey,
           adventurePda: this.adventurePda,
           heroMints,
+          dungeonMint: dungeonMintPk,
+          dungeonOwner: dungeonOwnerPk,
           fromEphemeral: false,
         });
 
@@ -1576,6 +2028,32 @@ export default class Game extends Phaser.Scene {
     return this.onChainDungeon ?? null;
   }
 
+  private async resolveDungeonOwner(
+    connection: Connection
+  ): Promise<PublicKey> {
+    if (this.onChainDungeon?.owner) {
+      try {
+        return new PublicKey(this.onChainDungeon.owner);
+      } catch (err) {
+        console.error("Invalid cached dungeon owner pubkey", err);
+      }
+    }
+
+    const dungeonMintAddress = this.adventureSession?.dungeonMint;
+    if (!dungeonMintAddress) {
+      throw new Error("Adventure session missing dungeon mint");
+    }
+
+    const dungeonMintKey = new PublicKey(dungeonMintAddress);
+    const fetched = await fetchDungeonByAddress(connection, dungeonMintKey);
+    if (!fetched?.owner) {
+      throw new Error("Unable to resolve dungeon owner");
+    }
+
+    this.onChainDungeon = fetched;
+    return new PublicKey(fetched.owner);
+  }
+
   private applyAdventureSession(session: ChainAdventure) {
     this.adventureSession = session;
     if (session.publicKey) {
@@ -1665,6 +2143,7 @@ export default class Game extends Phaser.Scene {
     this.closePortalModal();
     this.lastPortalTileShown = undefined;
     this.isExitingDungeon = false;
+    this.closeChestModal();
     this.heroHudTexts.forEach((text) => text.destroy());
     this.heroHudTexts = [];
     this.heroHudBg?.destroy();
@@ -1939,6 +2418,18 @@ export default class Game extends Phaser.Scene {
   }
 
   // Apply items to HUD (call this when you have data)
+  private syncInventoryFromAdventure() {
+    if (!this.adventureSession) return;
+    const hudItems = this.mapAdventureItemsToHud(
+      this.adventureSession.items ?? []
+    );
+    this.setInventory(hudItems);
+    if ((this.adventureSession.pendingLootCount ?? 0) === 0) {
+      this.dismissedChestIndex = null;
+      this.dismissedChestTile = undefined;
+    }
+  }
+
   private setInventory(items: InventoryItemParam[]) {
     // Normalize length to INVENTORY_SLOTS
     const data = items.slice(0, this.INVENTORY_SLOTS);
@@ -1974,11 +2465,16 @@ export default class Game extends Phaser.Scene {
   // Wire AdventureSession.items later: convert item_key -> your ItemId string
   // Example stub (replace when you map item_key to ItemId):
   private mapAdventureItemsToHud(
-    items: { item_key: number; quantity: number }[]
+    items: { itemKey: number; quantity: number }[]
   ): InventoryItemParam[] {
-    // TODO: Implement with your actual player-economy mapping
-    // For now, return empty
-    return [];
+    const mapped: InventoryItemParam[] = [];
+    items.forEach((slot) => {
+      if (!slot || slot.quantity <= 0) return;
+      const id = ITEM_KEY_TO_ID[slot.itemKey] as ItemId | undefined;
+      if (!id) return;
+      mapped.push({ id, qty: slot.quantity });
+    });
+    return mapped;
   }
 
   private updateSlotViewEmpty(slot: InventorySlotView) {
@@ -2041,13 +2537,10 @@ export default class Game extends Phaser.Scene {
     slot.container.add(slot.icon);
 
     // Count badge (only for stacks > 1)
-    const showCount = qty > 1;
     if (slot.countBg && slot.countText) {
-      slot.countBg.setVisible(showCount);
-      slot.countText.setVisible(showCount);
-      if (showCount) {
-        slot.countText.setText(String(qty));
-      }
+      slot.countBg.setVisible(true);
+      slot.countText.setVisible(true);
+      slot.countText.setText(String(qty));
     }
   }
 
