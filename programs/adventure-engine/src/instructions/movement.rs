@@ -1,8 +1,11 @@
 use anchor_lang::prelude::*;
 
+use crate::constants::{
+    ENCOUNTER_BASE_BPS, ENCOUNTER_MAX_TORCH, ENCOUNTER_MIN_TORCH, ENCOUNTER_TORCH_SLOPE_BPS,
+};
 use crate::errors::AdventureError;
-use crate::logic::is_floor;
-use crate::state::DungeonPoint;
+use crate::logic::{is_floor, Mulberry32};
+use crate::state::{AdventureSession, DungeonPoint};
 use crate::{Direction, MoveHero};
 
 impl Direction {
@@ -31,6 +34,10 @@ pub fn move_hero(ctx: Context<MoveHero>, direction: Direction) -> Result<()> {
 
     require!(adventure.is_active, AdventureError::AdventureNotActive);
     require!(adventure.heroes_inside, AdventureError::AdventureNotActive);
+    require!(
+        !adventure.in_combat,
+        AdventureError::MovementBlockedInCombat
+    );
 
     let (dx, dy) = direction.delta();
     let current = adventure.party_position;
@@ -62,5 +69,57 @@ pub fn move_hero(ctx: Context<MoveHero>, direction: Direction) -> Result<()> {
     // Decrement torch by 1 on each move, but don't go below 0
     adventure.torch = adventure.torch.saturating_sub(1);
 
+    maybe_trigger_encounter(adventure)?;
+
     Ok(())
+}
+
+fn maybe_trigger_encounter(adventure: &mut AdventureSession) -> Result<()> {
+    let clock = Clock::get()?;
+    let torch = adventure.torch;
+    let encounter_bps = encounter_chance_bps(torch);
+
+    if encounter_bps == 0 {
+        return Ok(());
+    }
+
+    let mut seed_mix = (adventure.seed as u64)
+        ^ ((clock.slot as u64) << 16)
+        ^ ((clock.unix_timestamp as u64) << 1)
+        ^ ((adventure.party_position.x as u64) << 40)
+        ^ ((adventure.party_position.y as u64) << 24);
+
+    if seed_mix == 0 {
+        seed_mix = 1;
+    }
+
+    let folded = (seed_mix as u32) ^ ((seed_mix >> 32) as u32);
+    let mut rng = Mulberry32::new(folded);
+    let roll = rng.next_u32() % 10_000;
+
+    if roll < encounter_bps as u32 {
+        let mut encounter_seed = seed_mix ^ ((rng.next_u32() as u64) << 8);
+        if encounter_seed == 0 {
+            encounter_seed = seed_mix | 1;
+        }
+        adventure.pending_encounter_seed = encounter_seed;
+        // Note: in_combat is set to true only when player accepts (via begin_encounter)
+        // This allows the frontend to show an encounter modal without blocking movement on-chain
+    }
+
+    Ok(())
+}
+
+fn encounter_chance_bps(torch: u8) -> u16 {
+    let clamped = torch.max(ENCOUNTER_MIN_TORCH).min(ENCOUNTER_MAX_TORCH);
+    let delta = (ENCOUNTER_MAX_TORCH as i16) - (clamped as i16);
+    let mut chance =
+        ENCOUNTER_BASE_BPS as i32 + (delta as i32) * (ENCOUNTER_TORCH_SLOPE_BPS as i32);
+    if chance < ENCOUNTER_BASE_BPS as i32 {
+        chance = ENCOUNTER_BASE_BPS as i32;
+    }
+    if chance > 9_500 {
+        chance = 9_500;
+    }
+    chance as u16
 }

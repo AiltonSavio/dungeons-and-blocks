@@ -64,4 +64,26 @@ pub enum AdventureError {
     DungeonOwnerEconomyMissing,
     #[msg("dungeon account mismatch")]
     InvalidDungeonAccount,
+    #[msg("combat encounter already active")]
+    CombatAlreadyActive,
+    #[msg("no combat encounter available to begin")]
+    NoPendingEncounter,
+    #[msg("combat account mismatch")]
+    InvalidCombatAccount,
+    #[msg("combat encounter is not active")]
+    CombatNotActive,
+    #[msg("movement is blocked while heroes are in combat")]
+    MovementBlockedInCombat,
+    #[msg("it is not the selected hero's turn")]
+    NotHeroTurn,
+    #[msg("selected hero cannot act (dead or incapacitated)")]
+    HeroNotAlive,
+    #[msg("selected enemy is not a valid target")]
+    EnemyNotAlive,
+    #[msg("insufficient action points for ability")]
+    InsufficientActionPoints,
+    #[msg("invalid target index")]
+    InvalidTarget,
+    #[msg("combat resolution pending")]
+    CombatNotResolved,
 }

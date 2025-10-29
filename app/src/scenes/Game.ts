@@ -12,6 +12,7 @@ import {
   HERO_SHEETS,
   HERO_CLASS_TO_KEY,
   PARTY_ORDER,
+  ENEMY_ASSETS,
   type HeroClassKey,
 } from "../content/units";
 import { MinimapController } from "./game/minimap";
@@ -28,7 +29,10 @@ import {
   deriveAdventurePda,
   directionFromDelta,
   fetchAdventureSessionSmart,
+  createBeginEncounterInstruction,
+  createDeclineEncounterInstruction,
   type AdventureDirection,
+  fetchAdventureSession,
 } from "../state/adventureChain";
 import { findTrait } from "../state/traitCatalog";
 import type { HeroClass, ItemDefinition } from "../state/models";
@@ -49,6 +53,12 @@ import {
   type ChestInventoryRow,
   type ChestLootSelection,
 } from "../ui/chestLootModal";
+import { EncounterPrompt } from "./game/encounterPrompt";
+import type { UnitAssets } from "../combat/types";
+
+function isDefaultPubkey(pk: PublicKey | undefined) {
+  return !pk || pk.equals(PublicKey.default);
+}
 
 enum Tile {
   Floor = 0,
@@ -118,6 +128,7 @@ type GameConfig = {
 };
 
 const STATUS_EFFECT_NAMES = ["Bleeding", "Poison", "Burn", "Chill"];
+const COMBAT_SCENE_KEY = "Combat";
 
 // ==================== GAME SCENE ====================
 
@@ -170,6 +181,7 @@ export default class Game extends Phaser.Scene {
   private activeChestIndex: number | null = null;
   private dismissedChestIndex: number | null = null;
   private dismissedChestTile?: { x: number; y: number };
+  private encounterPrompt?: EncounterPrompt;
 
   // Portal modal
   private portalModalOverlay?: Phaser.GameObjects.Rectangle;
@@ -193,6 +205,11 @@ export default class Game extends Phaser.Scene {
   private solanaConnection?: Connection;
   private playerPublicKey?: PublicKey;
   private tempKeypair?: Keypair;
+  private tempWalletAdapter?: {
+    publicKey: PublicKey;
+    signTransaction: (tx: Transaction) => Promise<Transaction>;
+    signAndSendTransaction: (tx: Transaction) => Promise<string>;
+  };
   private heroHudTexts: Phaser.GameObjects.Text[] = [];
   private heroHudPanel?: Phaser.GameObjects.Container;
   private heroHudBg?: Phaser.GameObjects.Graphics;
@@ -219,6 +236,7 @@ export default class Game extends Phaser.Scene {
     seq: number;
   }> = [];
   private movementBusy = false;
+  private isWaitingForCombat = false;
   private isNearInteractable = false; // Blocks movement when near chest/portal
 
   // Performance tracking
@@ -365,6 +383,7 @@ export default class Game extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.cleanup();
     });
+    this.events.on(Phaser.Scenes.Events.RESUME, this.handleSceneResume, this);
 
     // Reset state
     this.sceneReady = false;
@@ -517,11 +536,14 @@ export default class Game extends Phaser.Scene {
       this.minimap.handleResize(this.scale.width, this.scale.height);
       this.positionInventoryHud();
       this.rebuildHeroHud();
+      this.encounterPrompt?.handleResize(this.scale.width, this.scale.height);
     });
 
     // Mark scene as ready
     this.sceneReady = true;
     this.rebuildHeroHud();
+
+    await this.resumeCombatIfActive();
   }
 
   update(_time: number, deltaMs: number): void {
@@ -804,6 +826,14 @@ export default class Game extends Phaser.Scene {
               y: updated.partyPosition.y,
             };
             this.optimisticTile = { ...this.lastConfirmedTile };
+
+            // Check for encounter
+            if (
+              updated.pendingEncounterSeed !== 0n &&
+              !this.isWaitingForCombat
+            ) {
+              this.handleEncounter();
+            }
           }
         } catch (err) {
           console.error(`[Game] Move attempt ${attempt + 1} failed:`, err);
@@ -1931,6 +1961,265 @@ export default class Game extends Phaser.Scene {
     return w.solana;
   }
 
+  private getHeroClassKeysForCombat(): HeroClassKey[] {
+    if (this.partyKeys.length) {
+      return [...this.partyKeys];
+    }
+    if (this.partyHeroes.length) {
+      return this.partyHeroes
+        .map(
+          (hero) =>
+            HERO_CLASS_TO_KEY[hero.cls as keyof typeof HERO_CLASS_TO_KEY]
+        )
+        .filter((key): key is HeroClassKey => Boolean(key));
+    }
+    return [];
+  }
+
+  private async handleEncounter(): Promise<void> {
+    if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair) {
+      return;
+    }
+    if (this.encounterPrompt) {
+      return;
+    }
+    const connection = this.getSolanaConnection();
+    if (!connection) return;
+    if (!this.uiLayer) return;
+
+    this.isWaitingForCombat = true;
+    this.movementQueue = [];
+
+    const prompt = new EncounterPrompt({
+      scene: this,
+      uiLayer: this.uiLayer,
+      durationSeconds: 12,
+      torchPercent: () =>
+        Math.max(0, Math.min(100, this.adventureSession?.torch ?? 0)),
+      enemies: this.buildEncounterPreview(),
+      onConfirm: () => void this.acceptEncounter(),
+      onFlee: () => void this.declineEncounter(),
+    });
+
+    this.encounterPrompt = prompt;
+    prompt.show(this.scale.width, this.scale.height);
+  }
+
+  private async acceptEncounter(): Promise<void> {
+    if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair) {
+      this.isWaitingForCombat = false;
+      return;
+    }
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.isWaitingForCombat = false;
+      return;
+    }
+
+    this.destroyEncounterPrompt();
+
+    const funded = await this.checkTempKeypairFunded();
+    if (!funded) {
+      console.error("[Game] Temp keypair not funded; cannot start combat.");
+      this.isWaitingForCombat = false;
+      return;
+    }
+
+    try {
+      const ix = await createBeginEncounterInstruction({
+        connection,
+        owner: this.playerPublicKey,
+        authority: this.tempKeypair.publicKey,
+        adventureKey: this.adventurePda,
+      });
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("confirmed");
+
+      const tx = new Transaction({
+        feePayer: this.tempKeypair.publicKey,
+        recentBlockhash: blockhash,
+      });
+      tx.add(ix);
+      tx.sign(this.tempKeypair);
+
+      const signature = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: false,
+      });
+
+      await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      this.isWaitingForCombat = false;
+
+      const authorityAdapter = this.getTempWalletAdapter(connection);
+
+      this.scene.launch(COMBAT_SCENE_KEY, {
+        adventureKey: this.adventurePda.toBase58(),
+        ownerKey: this.playerPublicKey.toBase58(),
+        connection,
+        authority: authorityAdapter,
+        heroClasses: this.getHeroClassKeysForCombat(),
+      });
+      this.scene.pause();
+    } catch (err) {
+      console.error("[Game] Failed to begin encounter:", err);
+      this.isWaitingForCombat = false;
+      if (
+        this.adventureSession?.pendingEncounterSeed &&
+        this.adventureSession.pendingEncounterSeed !== 0n
+      ) {
+        this.time.delayedCall(300, () => {
+          if (!this.encounterPrompt) {
+            void this.handleEncounter();
+          }
+        });
+      }
+    }
+  }
+
+  private async declineEncounter(): Promise<void> {
+    if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair) {
+      this.isWaitingForCombat = false;
+      return;
+    }
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      this.isWaitingForCombat = false;
+      return;
+    }
+
+    this.destroyEncounterPrompt();
+
+    const funded = await this.checkTempKeypairFunded();
+    if (!funded) {
+      console.error(
+        "[Game] Temp keypair not funded; cannot decline encounter."
+      );
+      this.isWaitingForCombat = false;
+      return;
+    }
+
+    try {
+      const ix = await createDeclineEncounterInstruction({
+        connection,
+        owner: this.playerPublicKey,
+        authority: this.tempKeypair.publicKey,
+        adventureKey: this.adventurePda,
+      });
+
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("confirmed");
+      const tx = new Transaction({
+        feePayer: this.tempKeypair.publicKey,
+        recentBlockhash: blockhash,
+      });
+      tx.add(ix);
+      tx.sign(this.tempKeypair);
+
+      const signature = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: false,
+      });
+      await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      const updated = await fetchAdventureSessionSmart(
+        connection,
+        null,
+        this.adventurePda
+      );
+      if (updated) {
+        this.applyAdventureSession(updated);
+        this.lastConfirmedTile = {
+          x: updated.partyPosition.x,
+          y: updated.partyPosition.y,
+        };
+        this.optimisticTile = { ...this.lastConfirmedTile };
+        this.rebuildHeroHud();
+      }
+    } catch (err) {
+      console.error("[Game] Failed to decline encounter:", err);
+    } finally {
+      this.isWaitingForCombat = false;
+      if (
+        this.adventureSession?.pendingEncounterSeed &&
+        this.adventureSession.pendingEncounterSeed !== 0n &&
+        !this.encounterPrompt
+      ) {
+        this.time.delayedCall(300, () => {
+          if (!this.encounterPrompt) {
+            void this.handleEncounter();
+          }
+        });
+      }
+    }
+  }
+
+  private buildEncounterPreview(): UnitAssets[] {
+    if (!ENEMY_ASSETS.length) return [];
+
+    const seedBig = this.adventureSession?.pendingEncounterSeed ?? 0n;
+    let state =
+      Number(seedBig % BigInt(0x7fffffff)) ||
+      Math.floor(Math.random() * 0x7fffffff);
+
+    const picks: UnitAssets[] = [];
+    const max = Math.min(3, ENEMY_ASSETS.length);
+
+    for (let i = 0; i < max; i++) {
+      state = (state * 1103515245 + 12345) & 0x7fffffff;
+      const enemy = ENEMY_ASSETS[state % ENEMY_ASSETS.length];
+      picks.push(enemy);
+    }
+
+    return picks;
+  }
+
+  private destroyEncounterPrompt(): void {
+    this.encounterPrompt?.destroy();
+    this.encounterPrompt = undefined;
+  }
+
+  private handleSceneResume(): void {
+    this.isWaitingForCombat = false;
+    this.destroyEncounterPrompt();
+  }
+
+  private getTempWalletAdapter(connection: Connection) {
+    if (!this.tempKeypair) {
+      throw new Error("Temp keypair unavailable for combat operations");
+    }
+
+    if (
+      !this.tempWalletAdapter ||
+      !this.tempWalletAdapter.publicKey.equals(this.tempKeypair.publicKey)
+    ) {
+      const keypair = this.tempKeypair;
+      const conn = connection;
+      this.tempWalletAdapter = {
+        publicKey: keypair.publicKey,
+        signTransaction: async (tx: Transaction) => {
+          tx.feePayer = keypair.publicKey;
+          tx.partialSign(keypair);
+          return tx;
+        },
+        signAndSendTransaction: async (tx: Transaction) => {
+          tx.feePayer = keypair.publicKey;
+          tx.partialSign(keypair);
+          const signature = await conn.sendRawTransaction(tx.serialize(), {
+            skipPreflight: false,
+          });
+          return signature;
+        },
+      };
+    }
+
+    return this.tempWalletAdapter!;
+  }
+
   // ==================== CHAIN INTEGRATION ====================
 
   private getSolanaConnection(): Connection | undefined {
@@ -2138,6 +2427,10 @@ export default class Game extends Phaser.Scene {
   }
 
   private cleanup() {
+    this.events.off(Phaser.Scenes.Events.RESUME, this.handleSceneResume, this);
+    this.destroyEncounterPrompt();
+    this.isWaitingForCombat = false;
+    this.tempWalletAdapter = undefined;
     this.movementQueue = [];
     this.movementBusy = false;
     this.closePortalModal();
@@ -2150,6 +2443,71 @@ export default class Game extends Phaser.Scene {
     this.heroHudBg = undefined;
     this.heroHudPanel?.destroy();
     this.heroHudPanel = undefined;
+  }
+
+  private async resumeCombatIfActive() {
+    if (!this.adventurePda) return;
+    const connection = this.getSolanaConnection();
+    if (!connection) return;
+
+    const adventure = await fetchAdventureSession(
+      connection,
+      this.adventurePda
+    );
+    if (!adventure) return;
+
+    // Check flags from chain, not locally cached state
+    const inCombat = Boolean(adventure.inCombat);
+    const combatKeyStr = adventure.combatAccount as string | undefined; // adapt to your shape
+    const combatKey = combatKeyStr ? new PublicKey(combatKeyStr) : undefined;
+
+    if (!inCombat || !combatKey || isDefaultPubkey(combatKey)) return;
+
+    // Optionally verify the combat account exists (guards against RPC lag)
+    const combatInfo = await connection.getAccountInfo(combatKey, "confirmed");
+    if (!combatInfo) {
+      // brief, tolerant retry (optional)
+      const ok = await this.waitForCombatReady(
+        connection,
+        this.adventurePda,
+        3000
+      );
+      if (!ok) return;
+    }
+
+    // Make sure we have an authority adapter (temp keypair) to sign turns
+    const authorityAdapter = this.getTempWalletAdapter(connection);
+    if (!authorityAdapter?.publicKey) return;
+
+    // Launch combat scene and pause game scene
+    this.scene.launch("Combat", {
+      adventureKey: this.adventurePda.toBase58(),
+      ownerKey: this.playerPublicKey?.toBase58(),
+      connection,
+      authority: authorityAdapter,
+      heroClasses: this.getHeroClassKeysForCombat(),
+    });
+    this.scene.pause();
+  }
+
+  private async waitForCombatReady(
+    connection: Connection,
+    adventureKey: PublicKey,
+    timeoutMs = 5000
+  ): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const adv = await fetchAdventureSession(connection, adventureKey);
+      if (adv && adv.inCombat && adv.combatAccount) {
+        const ck = new PublicKey(adv.combatAccount);
+        if (!isDefaultPubkey(ck)) {
+          const info = await connection.getAccountInfo(ck, "confirmed");
+          if (info) return true;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    return false;
   }
 
   private rebuildHeroHud() {

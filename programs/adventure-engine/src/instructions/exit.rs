@@ -23,6 +23,7 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
         adventure_ref.heroes_inside,
         AdventureError::AdventureNotActive
     );
+    require!(!adventure_ref.in_combat, AdventureError::CombatNotResolved);
 
     let hero_count = adventure_ref.hero_count as usize;
     let mut portal_hit: Option<(usize, DungeonPoint)> = None;
@@ -259,6 +260,9 @@ pub fn exit_adventure<'info>(ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info
         adventure.is_active = false;
         adventure.heroes_inside = false;
         adventure.last_crew_timestamp = now;
+        adventure.in_combat = false;
+        adventure.combat_account = Pubkey::default();
+        adventure.pending_encounter_seed = 0;
         adventure
             .pending_loot
             .iter_mut()

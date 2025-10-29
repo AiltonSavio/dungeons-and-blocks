@@ -2,9 +2,11 @@ import {
   BorshInstructionCoder,
   AnchorProvider,
   Program,
+  BorshCoder,
 } from "@coral-xyz/anchor";
 import type { IdlAccounts } from "@coral-xyz/anchor";
 import {
+  Commitment,
   Connection,
   Keypair,
   PublicKey,
@@ -36,8 +38,8 @@ export const PLAYER_ECONOMY_PROGRAM_ID = new PublicKey(
 const ADVENTURE_SEED = Buffer.from("adventure");
 const HERO_LOCK_SEED = Buffer.from("hero-lock");
 const BUFFER_SEED = Buffer.from("buffer");
-const DELEGATION_RECORD_SEED = Buffer.from("delegation");
-const DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
+const _DELEGATION_RECORD_SEED = Buffer.from("delegation");
+const _DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
 const PLAYER_ECONOMY_SEED = Buffer.from("player_economy");
 
 // Create instruction coder
@@ -81,6 +83,9 @@ export type ChainAdventure = {
   lastCrewCount: number;
   lastCrew: string[];
   torch: number;
+  inCombat: boolean;
+  combatAccount: string | null;
+  pendingEncounterSeed: bigint;
 };
 
 export type ItemSlot = {
@@ -350,6 +355,14 @@ export function mapAdventureAccount(
     lastCrewCount: Number(account.lastCrewCount),
     lastCrew,
     torch: Number(account.torch),
+    inCombat: Boolean(account.inCombat),
+    combatAccount:
+      account.combatAccount && !account.combatAccount.equals(PublicKey.default)
+        ? account.combatAccount.toBase58()
+        : null,
+    pendingEncounterSeed: BigInt(
+      (account.pendingEncounterSeed as any).toString()
+    ),
   };
 }
 
@@ -851,4 +864,449 @@ export async function fetchHeroLockStatuses(
   }
 
   return statusMap;
+}
+
+// ========== COMBAT SYSTEM ==========
+
+const COMBAT_SEED = Buffer.from("combat");
+
+export type ChainCombat = {
+  publicKey: string;
+  adventure: string;
+  bump: number;
+  active: boolean;
+  round: number;
+  turnCursor: number;
+  turn: {
+    isHero: boolean;
+    actorIndex: number;
+    slotIndex: number;
+  };
+  rngState: bigint;
+  torch: number;
+  heroCount: number;
+  enemyCount: number;
+  heroes: ChainHeroCombatant[];
+  enemies: ChainEnemyCombatant[];
+  initiative: ChainInitiativeSlot[];
+  resolution: {
+    pending: boolean;
+    victory: boolean;
+  };
+  lastUpdated: number;
+};
+
+export type ChainHeroCombatant = {
+  heroIndex: number;
+  alive: boolean;
+  ap: number;
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  magic: number;
+  resistance: number;
+  speed: number;
+  luck: number;
+  stress: number;
+  killStreak: number;
+  guard: boolean;
+  statuses: ChainStatusInstance[];
+  pendingXp: number;
+  pendingPositiveTraits: number;
+  pendingNegativeTraits: number;
+};
+
+export type ChainEnemyCombatant = {
+  kind: number;
+  alive: boolean;
+  ap: number;
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  magic: number;
+  resistance: number;
+  speed: number;
+  luck: number;
+  statuses: ChainStatusInstance[];
+  threat: number;
+};
+
+export type ChainStatusInstance = {
+  effect: StatusEffect;
+  duration: number;
+  stacks: number;
+};
+
+export type ChainInitiativeSlot = {
+  kind: number; // 0 = Hero, 1 = Enemy, 2 = None
+  index: number;
+  speed: number;
+  active: boolean;
+  order: number;
+};
+
+export enum CombatResolutionState {
+  Active = 0,
+  Victory = 1,
+  Defeat = 2,
+  Escape = 3,
+}
+
+export enum StatusEffect {
+  None = 0,
+  Poison = 1,
+  Bleed = 2,
+  Burn = 3,
+  Chill = 4,
+  Guard = 5,
+}
+
+export enum HeroActionKind {
+  Attack = 0,
+  Skill1 = 1,
+  Skill2 = 2,
+  Defend = 3,
+  UseItem = 4,
+}
+
+export enum TargetSelector {
+  Enemy0 = 0,
+  Enemy1 = 1,
+  Enemy2 = 2,
+  Enemy3 = 3,
+  Ally0 = 4,
+  Ally1 = 5,
+  Ally2 = 6,
+  Ally3 = 7,
+  None = 8,
+}
+
+export enum TargetSide {
+  Hero = 0,
+  Enemy = 1,
+}
+
+const ACTION_VARIANT: Record<
+  HeroActionKind,
+  "attack" | "skill1" | "skill2" | "defend" | "useItem"
+> = {
+  [HeroActionKind.Attack]: "attack",
+  [HeroActionKind.Skill1]: "skill1",
+  [HeroActionKind.Skill2]: "skill2",
+  [HeroActionKind.Defend]: "defend",
+  [HeroActionKind.UseItem]: "useItem",
+};
+
+/** Derive the combat PDA from adventure key */
+export function deriveCombatPda(adventureKey: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [COMBAT_SEED, adventureKey.toBuffer()],
+    ADVENTURE_ENGINE_PROGRAM_ID
+  );
+}
+
+/** Fetch combat state for an adventure */
+export async function fetchCombatState(
+  connection: Connection,
+  combatPda: PublicKey
+): Promise<ChainCombat | null> {
+  try {
+    const program = getAdventureProgram(connection);
+    const acc: any = await program.account.adventureCombat.fetch(combatPda);
+
+    // Helpers
+    const num = (v: any) => (typeof v === "number" ? v : Number(v));
+    const big = (v: any) => {
+      try {
+        if (typeof v === "bigint") return v;
+        if (typeof v === "number") return BigInt(v);
+        return BigInt(v?.toString?.() ?? String(v));
+      } catch {
+        return 0n;
+      }
+    };
+    const to58 = (pk: any) => (pk?.toBase58 ? pk.toBase58() : String(pk));
+
+    // Normalize initiative entries (array of fixed 8, but only first initiativeLen are relevant)
+    const rawInit: any[] = Array.isArray(acc.initiative) ? acc.initiative : [];
+    const initLen = Math.min(
+      num(acc.initiativeLen ?? rawInit.length),
+      rawInit.length
+    );
+
+    const parseKind = (slot: any): number => {
+      const k = slot?.occupantKind ?? slot?.kind;
+      if (typeof k === "number") {
+        if (k === 1) return 0; // hero
+        if (k === 2) return 1; // enemy
+        return 2; // none/empty
+      }
+      if (k?.hero !== undefined) return 0;
+      if (k?.enemy !== undefined) return 1;
+      return 2;
+    };
+
+    const initiative: ChainInitiativeSlot[] = Array.from({
+      length: initLen,
+    }).map((_, idx) => {
+      const slot = rawInit[idx] ?? {};
+      return {
+        kind: parseKind(slot),
+        index: num(slot?.index ?? slot?.occupantIndex ?? 0),
+        speed: num(slot?.initiativeValue ?? slot?.speed ?? 0),
+        active: slot?.active !== false,
+        order: num(slot?.order ?? idx),
+      };
+    });
+
+    const cursorRaw = num(acc.turnCursor ?? 0);
+    const clampCursor =
+      initLen > 0 ? Math.max(0, Math.min(cursorRaw, initLen - 1)) : 0;
+
+    const resolveActiveSlot = (): {
+      slot: ChainInitiativeSlot;
+      index: number;
+    } | null => {
+      if (initLen === 0) return null;
+      for (let offset = 0; offset < initLen; offset++) {
+        const pos = (clampCursor + offset) % initLen;
+        const slot = initiative[pos];
+        if (!slot) continue;
+        if (slot.active && slot.kind !== 2) {
+          return { slot, index: pos };
+        }
+      }
+      return null;
+    };
+
+    const activeSlot = resolveActiveSlot();
+    const turn = activeSlot
+      ? {
+          isHero: activeSlot.slot.kind === 0,
+          actorIndex: activeSlot.slot.index,
+          slotIndex: activeSlot.index,
+        }
+      : { isHero: true, actorIndex: 0, slotIndex: 0 };
+
+    // Normalize resolution enum
+    const res: any = acc.pendingResolution ?? acc.resolution;
+    const resolution =
+      res?.victory !== undefined
+        ? { pending: false, victory: true }
+        : res?.defeat !== undefined || res?.escape !== undefined
+        ? { pending: false, victory: false }
+        : { pending: true, victory: false };
+
+    // Map heroes/enemies safely
+    const heroes: ChainHeroCombatant[] = (acc.heroes ?? []).map((h: any) => ({
+      heroIndex: num(h.heroIndex),
+      alive: !!h.alive,
+      ap: num(h.ap),
+      hp: num(h.hp),
+      maxHp: num(h.maxHp),
+      attack: num(h.attack),
+      defense: num(h.defense),
+      magic: num(h.magic),
+      resistance: num(h.resistance),
+      speed: num(h.speed),
+      luck: num(h.luck),
+      stress: num(h.stress),
+      killStreak: num(h.killStreak),
+      guard: !!h.guard,
+      statuses: (h.statuses ?? []).map((s: any) => ({
+        effect: num(s.effect) as StatusEffect,
+        duration: num(s.duration),
+        stacks: num(s.stacks),
+      })),
+      pendingXp: num(h.pendingXp ?? 0),
+      pendingPositiveTraits: num(h.pendingPositiveTraits ?? 0),
+      pendingNegativeTraits: num(h.pendingNegativeTraits ?? 0),
+    }));
+
+    const enemies: ChainEnemyCombatant[] = (acc.enemies ?? []).map(
+      (e: any) => ({
+        kind: num(e.kind),
+        alive: !!e.alive,
+        ap: num(e.ap),
+        hp: num(e.hp),
+        maxHp: num(e.maxHp),
+        attack: num(e.attack),
+        defense: num(e.defense),
+        magic: num(e.magic),
+        resistance: num(e.resistance),
+        speed: num(e.speed),
+        luck: num(e.luck),
+        statuses: (e.statuses ?? []).map((s: any) => ({
+          effect: num(s.effect) as StatusEffect,
+          duration: num(s.duration),
+          stacks: num(s.stacks),
+        })),
+        threat: num(e.threat ?? 0),
+      })
+    );
+
+    return {
+      publicKey: combatPda.toBase58(),
+      adventure: to58(acc.adventure),
+      bump: num(acc.bump),
+      active: !!acc.active,
+      round: num(acc.round),
+      turnCursor: clampCursor,
+      turn,
+      rngState: big(acc.rngState),
+      torch: num(acc.torch),
+      heroCount: num(acc.heroCount),
+      enemyCount: num(acc.enemyCount),
+      heroes,
+      enemies,
+      initiative,
+      resolution,
+      lastUpdated: acc.lastUpdated ? num(acc.lastUpdated) : 0,
+    };
+  } catch (err) {
+    console.log("Error fetching combat state:", err);
+    return null;
+  }
+}
+
+/** Create instruction to begin encounter */
+export async function createBeginEncounterInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventureKey: PublicKey;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventureKey } = options;
+  const program = getAdventureProgram(connection, owner);
+  const [combatPda] = deriveCombatPda(adventureKey);
+
+  return await program.methods
+    .beginEncounter()
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventureKey,
+      combat: combatPda,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+}
+
+function targetPayload(
+  side: TargetSide,
+  idx: number | null
+):
+  | {
+      ally: number;
+    }
+  | {
+      enemy: number;
+    }
+  | {
+      none: {};
+    } {
+  if (idx == null || Number.isNaN(idx)) {
+    return { none: {} };
+  }
+  const i = Math.max(0, Math.min(3, idx));
+  return side === TargetSide.Enemy ? { enemy: i } : { ally: i };
+}
+
+/** Create instruction to submit combat action */
+export async function createSubmitCombatActionInstruction(options: {
+  connection: Connection;
+  adventureKey: PublicKey;
+  owner: PublicKey;
+  authority: PublicKey;
+  heroIndex: number;
+  action: HeroActionKind;
+  targetIndex: number | null;
+  targetSide: TargetSide;
+  itemKey?: number;
+}): Promise<TransactionInstruction> {
+  const {
+    connection,
+    adventureKey,
+    owner,
+    authority,
+    heroIndex,
+    action,
+    targetIndex,
+    targetSide,
+    itemKey,
+  } = options;
+
+  const program = getAdventureProgram(connection, owner);
+  const [combatPda] = deriveCombatPda(adventureKey);
+
+  // ---- Build enum payloads exactly as the IDL expects ----
+  const actionKey = ACTION_VARIANT[action];
+  if (!actionKey) throw new Error(`Unsupported action variant: ${action}`);
+
+  const target = targetPayload(targetSide, targetIndex);
+
+  console.log("Computed target payload:", target);
+
+  const instructionArgs = {
+    heroIndex,
+    action: { [actionKey]: {} },
+    target,
+    itemKey: itemKey ?? null,
+  };
+
+  console.log("Submitting combat action:", instructionArgs);
+
+  return await program.methods
+    .submitCombatAction(instructionArgs as any)
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventureKey,
+      combat: combatPda,
+    })
+    .instruction();
+}
+
+/** Create instruction to conclude combat */
+export async function createConcludeCombatInstruction(options: {
+  connection: Connection;
+  adventureKey: PublicKey;
+  owner: PublicKey;
+  authority: PublicKey;
+}): Promise<TransactionInstruction> {
+  const { connection, adventureKey, owner, authority } = options;
+  const program = getAdventureProgram(connection, owner);
+  const [combatPda] = deriveCombatPda(adventureKey);
+
+  return await program.methods
+    .concludeCombat()
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventureKey,
+      combat: combatPda,
+    })
+    .instruction();
+}
+
+/** Create instruction to decline an encounter */
+export async function createDeclineEncounterInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventureKey: PublicKey;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventureKey } = options;
+  const program = getAdventureProgram(connection, owner);
+
+  return await program.methods
+    .declineEncounter()
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventureKey,
+    })
+    .instruction();
 }

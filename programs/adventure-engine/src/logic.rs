@@ -10,16 +10,16 @@ pub struct GeneratedAdventure {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct Mulberry32 {
+pub struct Mulberry32 {
     state: u32,
 }
 
 impl Mulberry32 {
-    pub(crate) fn new(seed: u32) -> Self {
+    pub fn new(seed: u32) -> Self {
         Self { state: seed }
     }
 
-    pub(crate) fn next_u32(&mut self) -> u32 {
+    pub fn next_u32(&mut self) -> u32 {
         self.state = self.state.wrapping_add(0x6d2b_79f5);
         let mut t = self.state;
         t = (t ^ (t >> 15)).wrapping_mul(t | 1);
@@ -27,11 +27,11 @@ impl Mulberry32 {
         t ^ (t >> 14)
     }
 
-    pub(crate) fn next_f32(&mut self) -> f32 {
+    pub fn next_f32(&mut self) -> f32 {
         self.next_u32() as f32 / 4_294_967_296.0
     }
 
-    pub(crate) fn next_range(&mut self, min: u16, max: u16) -> u16 {
+    pub fn next_range(&mut self, min: u16, max: u16) -> u16 {
         let span = max.saturating_sub(min);
         min + ((self.next_u32() % (span as u32 + 1)) as u16)
     }

@@ -40,6 +40,9 @@ pub struct AdventureSession {
     pub last_crew_count: u8,
     pub last_crew: [Pubkey; MAX_PARTY],
     pub torch: u8,
+    pub in_combat: bool,
+    pub combat_account: Pubkey,
+    pub pending_encounter_seed: u64,
 }
 
 impl AdventureSession {
@@ -78,7 +81,10 @@ impl AdventureSession {
             + (8 * 4)
             + 1
             + (32 * MAX_PARTY)
-            + 1;
+            + 1
+            + 1
+            + 32
+            + 8;
 
         fixed
             + grid_space
@@ -262,4 +268,198 @@ pub struct DungeonPoint {
 
 impl DungeonPoint {
     pub const SIZE: usize = 4;
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusEffect {
+    None = 0,
+    Poison = 1,
+    Bleed = 2,
+    Burn = 3,
+    Chill = 4,
+    Guard = 5,
+}
+
+impl Default for StatusEffect {
+    fn default() -> Self {
+        StatusEffect::None
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StatusInstance {
+    pub effect: StatusEffect,
+    pub duration: u8,
+    pub stacks: u8,
+}
+
+impl StatusInstance {
+    pub const SIZE: usize = 1 + 1 + 1;
+
+    pub fn clear(&mut self) {
+        self.effect = StatusEffect::None;
+        self.duration = 0;
+        self.stacks = 0;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self.effect, StatusEffect::None) || self.duration == 0 || self.stacks == 0
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CombatantKind {
+    None = 0,
+    Hero = 1,
+    Enemy = 2,
+}
+
+impl Default for CombatantKind {
+    fn default() -> Self {
+        CombatantKind::None
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InitiativeSlot {
+    pub occupant_kind: CombatantKind,
+    pub index: u8,
+    pub initiative_value: i16,
+    pub order: u8,
+    pub active: bool,
+}
+
+impl InitiativeSlot {
+    pub const SIZE: usize = 1 + 1 + 2 + 1 + 1;
+
+    pub fn clear(&mut self) {
+        self.occupant_kind = CombatantKind::None;
+        self.index = u8::MAX;
+        self.initiative_value = 0;
+        self.order = 0;
+        self.active = false;
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeroCombatant {
+    pub hero_index: u8,
+    pub alive: bool,
+    pub ap: u8,
+    pub hp: u16,
+    pub max_hp: u16,
+    pub attack: u16,
+    pub defense: u16,
+    pub magic: u16,
+    pub resistance: u16,
+    pub speed: u16,
+    pub luck: u16,
+    pub stress: u16,
+    pub kill_streak: u8,
+    pub guard: bool,
+    pub statuses: [StatusInstance; MAX_STATUS_PER_COMBATANT],
+    pub pending_xp: u32,
+    pub pending_positive_traits: u8,
+    pub pending_negative_traits: u8,
+}
+
+impl HeroCombatant {
+    pub const SIZE: usize =
+        1 + 1 + 1 + (2 * 9) + 1 + 1 + (StatusInstance::SIZE * MAX_STATUS_PER_COMBATANT) + 4 + 1 + 1;
+
+    pub fn reset(&mut self) {
+        self.ap = HERO_AP_MAX;
+        self.kill_streak = 0;
+        self.guard = false;
+        for status in self.statuses.iter_mut() {
+            status.clear();
+        }
+        self.pending_xp = 0;
+        self.pending_positive_traits = 0;
+        self.pending_negative_traits = 0;
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnemyCombatant {
+    pub kind: u8,
+    pub alive: bool,
+    pub ap: u8,
+    pub hp: u16,
+    pub max_hp: u16,
+    pub attack: u16,
+    pub defense: u16,
+    pub magic: u16,
+    pub resistance: u16,
+    pub speed: u16,
+    pub luck: u16,
+    pub statuses: [StatusInstance; MAX_STATUS_PER_COMBATANT],
+    pub threat: u8,
+}
+
+impl EnemyCombatant {
+    pub const SIZE: usize =
+        1 + 1 + 1 + (2 * 8) + (StatusInstance::SIZE * MAX_STATUS_PER_COMBATANT) + 1;
+
+    pub fn reset(&mut self) {
+        self.ap = ENEMY_AP_MAX;
+        for status in self.statuses.iter_mut() {
+            status.clear();
+        }
+        self.threat = 0;
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CombatResolutionState {
+    Active,
+    Victory,
+    Defeat,
+    Escape,
+}
+
+impl Default for CombatResolutionState {
+    fn default() -> Self {
+        CombatResolutionState::Active
+    }
+}
+
+#[account]
+pub struct AdventureCombat {
+    pub adventure: Pubkey,
+    pub bump: u8,
+    pub active: bool,
+    pub round: u16,
+    pub turn_cursor: u8,
+    pub torch: u8,
+    pub rng_state: u64,
+    pub hero_count: u8,
+    pub enemy_count: u8,
+    pub initiative_len: u8,
+    pub initiative: [InitiativeSlot; MAX_COMBATANTS],
+    pub heroes: [HeroCombatant; MAX_PARTY],
+    pub enemies: [EnemyCombatant; MAX_ENEMIES],
+    pub pending_resolution: CombatResolutionState,
+    pub loot_seed: u64,
+    pub last_updated: i64,
+}
+
+impl AdventureCombat {
+    pub const LEN: usize = 8
+        + 32
+        + 1
+        + 1
+        + 2
+        + 1
+        + 1
+        + 8
+        + 1
+        + 1
+        + 1
+        + (InitiativeSlot::SIZE * MAX_COMBATANTS)
+        + (HeroCombatant::SIZE * MAX_PARTY)
+        + (EnemyCombatant::SIZE * MAX_ENEMIES)
+        + 1
+        + 8
+        + 8;
 }

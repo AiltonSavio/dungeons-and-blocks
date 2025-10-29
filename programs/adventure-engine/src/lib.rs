@@ -1,8 +1,13 @@
 use anchor_lang::prelude::*;
 use dungeon_nft::state::DungeonMint;
 
-use crate::{constants::ADVENTURE_SEED, errors::AdventureError, state::AdventureSession};
+use crate::{
+    constants::{ADVENTURE_SEED, COMBAT_SEED},
+    errors::AdventureError,
+    state::{AdventureCombat, AdventureSession},
+};
 
+pub mod combat;
 pub mod constants;
 pub mod errors;
 pub mod instructions;
@@ -177,6 +182,91 @@ pub struct OpenChest<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
+#[derive(Accounts)]
+pub struct BeginEncounter<'info> {
+    /// CHECK: Adventure owner; used for PDA derivation
+    pub owner: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [ADVENTURE_SEED, owner.key().as_ref(), adventure.dungeon_mint.as_ref()],
+        bump = adventure.bump,
+        constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch
+    )]
+    pub adventure: Account<'info, AdventureSession>,
+    #[account(
+        init,
+        payer = authority,
+        space = AdventureCombat::LEN,
+        seeds = [COMBAT_SEED, adventure.key().as_ref()],
+        bump
+    )]
+    pub combat: Account<'info, AdventureCombat>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SubmitCombatAction<'info> {
+    /// CHECK: Adventure owner; used for PDA derivation
+    pub owner: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [ADVENTURE_SEED, owner.key().as_ref(), adventure.dungeon_mint.as_ref()],
+        bump = adventure.bump,
+        constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch,
+        constraint = adventure.in_combat @ AdventureError::CombatNotActive
+    )]
+    pub adventure: Account<'info, AdventureSession>,
+    #[account(
+        mut,
+        seeds = [COMBAT_SEED, adventure.key().as_ref()],
+        bump = combat.bump,
+        constraint = combat.active @ AdventureError::CombatNotActive
+    )]
+    pub combat: Account<'info, AdventureCombat>,
+}
+
+#[derive(Accounts)]
+pub struct ConcludeCombat<'info> {
+    /// CHECK: Adventure owner; used for PDA derivation
+    #[account(mut)]
+    pub owner: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [ADVENTURE_SEED, owner.key().as_ref(), adventure.dungeon_mint.as_ref()],
+        bump = adventure.bump,
+        constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch
+    )]
+    pub adventure: Account<'info, AdventureSession>,
+    #[account(
+        mut,
+        seeds = [COMBAT_SEED, adventure.key().as_ref()],
+        bump = combat.bump,
+        constraint = adventure.combat_account == combat.key() @ AdventureError::InvalidCombatAccount
+    )]
+    pub combat: Account<'info, AdventureCombat>,
+}
+
+#[derive(Accounts)]
+pub struct DeclineEncounter<'info> {
+    /// CHECK: Adventure owner; used for PDA derivation
+    pub owner: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [ADVENTURE_SEED, owner.key().as_ref(), adventure.dungeon_mint.as_ref()],
+        bump = adventure.bump,
+        constraint = adventure.player == owner.key() @ AdventureError::AdventureOwnerMismatch
+    )]
+    pub adventure: Account<'info, AdventureSession>,
+}
+
 #[program]
 pub mod adventure_engine {
     use super::*;
@@ -235,5 +325,24 @@ pub mod adventure_engine {
         ctx: Context<'_, '_, '_, 'info, ExitAdventure<'info>>,
     ) -> Result<()> {
         crate::instructions::exit::exit_adventure(ctx)
+    }
+
+    pub fn begin_encounter(ctx: Context<BeginEncounter>) -> Result<()> {
+        crate::instructions::combat::begin_encounter(ctx)
+    }
+
+    pub fn submit_combat_action(
+        ctx: Context<SubmitCombatAction>,
+        instruction: crate::instructions::combat::CombatInstruction,
+    ) -> Result<()> {
+        crate::instructions::combat::submit_combat_action(ctx, instruction)
+    }
+
+    pub fn conclude_combat(ctx: Context<ConcludeCombat>) -> Result<()> {
+        crate::instructions::combat::conclude_combat(ctx)
+    }
+
+    pub fn decline_encounter(ctx: Context<DeclineEncounter>) -> Result<()> {
+        crate::instructions::combat::decline_encounter(ctx)
     }
 }

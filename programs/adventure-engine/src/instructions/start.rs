@@ -350,6 +350,9 @@ pub fn start_adventure<'info>(
         adventure.last_crew_count = adventure.hero_count;
         adventure.last_crew_timestamp = now;
         adventure.torch = 100;
+        adventure.in_combat = false;
+        adventure.combat_account = Pubkey::default();
+        adventure.pending_encounter_seed = 0;
     }
 
     Ok(())
