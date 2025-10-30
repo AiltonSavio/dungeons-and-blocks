@@ -54,6 +54,7 @@ export default class Combat extends Phaser.Scene {
 
   // UI state
   private uiMode: UIMode = "idle";
+  // @ts-ignore
   private selectedHeroIndex = 0;
   private selectedAction?: HeroActionKind;
   private selectedTargetIndex = 0;
@@ -79,10 +80,12 @@ export default class Combat extends Phaser.Scene {
 
   private mainMenu?: Phaser.GameObjects.Container;
   private skillsMenu?: Phaser.GameObjects.Container;
+  // @ts-ignore
   private awaitingPlayer = false;
   private currentHeroIndex?: number;
   private targetDisposers: Array<() => void> = [];
-  private defendedHeroes = new Set<number>();
+  // @ts-ignore
+  private _defendedHeroes = new Set<number>();
 
   private heroBaseScale = new Map<number, number>();
   private enemyBaseScale = new Map<number, number>();
@@ -337,7 +340,8 @@ export default class Combat extends Phaser.Scene {
     this.uiMode = "processing";
 
     // Move the hero “center-left” before opening the menu
-    const slot = this.heroSlots[heroIndex];
+    // @ts-ignore
+    const _slot = this.heroSlots[heroIndex];
     const toX = this.scale.width / 2 - 90;
     const toY = this.scale.height / 2 + 6;
 

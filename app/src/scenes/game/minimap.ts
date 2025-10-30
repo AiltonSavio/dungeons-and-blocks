@@ -9,6 +9,7 @@ type MinimapOptions = {
   tileSize: number;
   uiLayer: Phaser.GameObjects.Layer;
   storageKey?: string; // Unique key for localStorage (e.g., dungeon ID)
+  walletAddress?: string;
   padding?: number;
   debugColor?: number;
   debugRadius?: number;
@@ -46,8 +47,11 @@ export class MinimapController {
     this.padding = opts.padding ?? 10;
 
     // Use provided storage key or create default
-    this.storageKey =
+    const baseKey =
       opts.storageKey ?? `minimap_${this.gridWidth}x${this.gridHeight}`;
+    this.storageKey = opts.walletAddress
+      ? `${opts.walletAddress}_${baseKey}`
+      : baseKey;
 
     this.explored = this.createExploredGrid();
     this.loadFromStorage();
@@ -217,6 +221,16 @@ export class MinimapController {
     }
   }
 
+  clearStorage(): void {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    try {
+      window.localStorage.removeItem(this.storageKey);
+      console.log(`[Minimap] Cleared storage for key: ${this.storageKey}`);
+    } catch (err) {
+      console.warn("[Minimap] Failed to clear localStorage:", err);
+    }
+  }
+
   updateViewport(width: number, height: number): void {
     this.graphics.setPosition(
       width - this.padding - this.mmW,
@@ -267,5 +281,9 @@ export class MinimapController {
     this.mmTile = Math.max(1, Math.min(sX, sY));
     this.mmW = this.gridWidth * this.mmTile;
     this.mmH = this.gridHeight * this.mmTile;
+  }
+
+  destroy(): void {
+    this.graphics.destroy();
   }
 }

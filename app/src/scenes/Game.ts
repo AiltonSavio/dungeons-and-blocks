@@ -1869,6 +1869,11 @@ export default class Game extends Phaser.Scene {
 
         console.log(`[Game] Exit transaction confirmed: ${signature}`);
 
+        // Clear minimap data from localStorage
+        if (this.minimap) {
+          this.minimap.clearStorage();
+        }
+
         // Success - close modal and return to town
         this.closePortalModal();
         this.isExitingDungeon = false;
@@ -1891,6 +1896,9 @@ export default class Game extends Phaser.Scene {
       }
     } else {
       // No adventure session, just go back to town
+      if (this.minimap) {
+        this.minimap.clearStorage();
+      }
       this.closePortalModal();
       this.isExitingDungeon = false;
       this.scene.start("TownScene");
@@ -2745,12 +2753,12 @@ export default class Game extends Phaser.Scene {
   }
 
   private positionInventoryHud() {
-    if (!this.inventoryPanel) return;
-    const uiW = this.uiCam?.width ?? this.scale.width;
+    // @ts-ignore
+    const _uiW = this.uiCam?.width ?? this.scale.width;
     const uiH = this.uiCam?.height ?? this.scale.height;
     const x = this.inventoryMargin;
     const y = uiH - this.inventoryMargin - this.inventoryPanelH;
-    this.inventoryPanel.setPosition(x, y);
+    this.inventoryPanel!.setPosition(x, y);
   }
 
   // Create one slot view
@@ -2893,6 +2901,54 @@ export default class Game extends Phaser.Scene {
     return mapped;
   }
 
+  private ensureCountBadge(slot: InventorySlotView) {
+    const size = this.inventoryCell;
+    const pad = 3;
+    const badge = Math.max(14, Math.floor(size * 0.34)); // pixel badge size
+    const half = Math.floor(badge / 2);
+
+    // --- Background (rounded rectangle) ---
+    if (!slot.countBg) {
+      const bg = this.add
+        .rectangle(0, 0, badge, badge, 0x000000, 0.75)
+        .setOrigin(0.5)
+        .setDepth(2);
+      bg.setStrokeStyle(1, 0xffffff, 0.25);
+
+      if (typeof (bg as any).setCornerRadius === "function") {
+        (bg as any).setCornerRadius(half); // make it appear circular-ish
+      }
+
+      slot.container.add(bg);
+      slot.countBg = bg;
+    }
+
+    if (!slot.countText) {
+      const txt = this.add
+        .text(0, 0, "0", {
+          fontFamily: "Kemco Pixel, Pixelify Sans, monospace",
+          fontSize: `${Math.floor(badge * 0.6)}px`,
+          color: "#ffffff",
+          align: "center",
+          stroke: "#000000",
+          strokeThickness: 3,
+        })
+        .setOrigin(0.5)
+        .setDepth(3)
+        .setResolution(2);
+      slot.container.add(txt);
+      slot.countText = txt;
+    }
+
+    const cx = size - pad - half;
+    const cy = pad + half;
+
+    const bg = slot.countBg!;
+    const txt = slot.countText!;
+    bg.setPosition(cx, cy);
+    txt.setPosition(cx, cy);
+  }
+
   private updateSlotViewEmpty(slot: InventorySlotView) {
     slot.id = undefined;
     slot.qty = 0;
@@ -2907,6 +2963,7 @@ export default class Game extends Phaser.Scene {
     slot.border?.setStrokeStyle(1, 0xffffff, 0.05);
 
     // Hide count
+    this.ensureCountBadge(slot);
     slot.countBg?.setVisible(false);
     slot.countText?.setVisible(false);
   }
@@ -2945,18 +3002,23 @@ export default class Game extends Phaser.Scene {
     } else {
       // Placeholder
       slot.icon = this.add
-        .image(centerX, centerY, "floor_clean_tile") // any small texture you have
+        .image(centerX, centerY, "floor_clean_tile")
         .setDisplaySize(size - 10, size - 10)
         .setOrigin(0.5)
         .setTint(0x333333);
     }
     slot.container.add(slot.icon);
 
-    // Count badge (only for stacks > 1)
-    if (slot.countBg && slot.countText) {
-      slot.countBg.setVisible(true);
-      slot.countText.setVisible(true);
-      slot.countText.setText(String(qty));
+    // Count badge logic (create/position, then show/hide)
+    this.ensureCountBadge(slot);
+
+    if (qty > 0) {
+      slot.countBg?.setVisible(true);
+      slot.countText?.setVisible(true);
+      slot.countText?.setText(String(qty));
+    } else {
+      slot.countBg?.setVisible(false);
+      slot.countText?.setVisible(false);
     }
   }
 
@@ -3118,7 +3180,8 @@ export default class Game extends Phaser.Scene {
     this.torchHud = undefined;
 
     const uiW = this.uiCam?.width ?? this.scale.width;
-    const uiH = this.uiCam?.height ?? this.scale.height;
+    // @ts-ignore
+    const _uiH = this.uiCam?.height ?? this.scale.height;
 
     const barW = Math.max(220, Math.min(420, Math.floor(uiW * 0.35)));
     const barH = 18;

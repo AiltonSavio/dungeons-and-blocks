@@ -2,11 +2,9 @@ import {
   BorshInstructionCoder,
   AnchorProvider,
   Program,
-  BorshCoder,
 } from "@coral-xyz/anchor";
 import type { IdlAccounts } from "@coral-xyz/anchor";
 import {
-  Commitment,
   Connection,
   Keypair,
   PublicKey,
@@ -38,8 +36,10 @@ export const PLAYER_ECONOMY_PROGRAM_ID = new PublicKey(
 const ADVENTURE_SEED = Buffer.from("adventure");
 const HERO_LOCK_SEED = Buffer.from("hero-lock");
 const BUFFER_SEED = Buffer.from("buffer");
-const _DELEGATION_RECORD_SEED = Buffer.from("delegation");
-const _DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
+// @ts-ignore
+const __DELEGATION_RECORD_SEED = Buffer.from("delegation");
+// @ts-ignore
+const __DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
 const PLAYER_ECONOMY_SEED = Buffer.from("player_economy");
 
 // Create instruction coder
