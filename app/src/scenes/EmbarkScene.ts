@@ -87,6 +87,7 @@ export class EmbarkScene extends Phaser.Scene {
   private activeTab: "my" | "community" = "my";
   private selectedDungeon?: SelectedDungeon;
   private chainHeroes: ChainHero[] = [];
+  private heroLockStatuses: Map<string, HeroLockStatus> = new Map();
   private heroesLoading = false;
   private heroLoadError?: string;
   private walletAddress?: string;
@@ -342,8 +343,12 @@ export class EmbarkScene extends Phaser.Scene {
 
     this.input.on(
       "wheel",
-      (_pointer: Phaser.Input.Pointer, _dx: number, dy: number) => {
-        const pointer = this.input.activePointer;
+      (
+        pointer: Phaser.Input.Pointer,
+        _gameObjects: Phaser.GameObjects.GameObject[],
+        _dx: number,
+        dy: number
+      ) => {
         const bounds = new Phaser.Geom.Rectangle(
           this.safe,
           this.safe + this.headerHeight + 24,
@@ -463,26 +468,30 @@ export class EmbarkScene extends Phaser.Scene {
       this.footerPartyMask = undefined;
       this.footerPartyMaskRect = undefined;
     } else {
-      const availableHeroes = this.chainHeroes;
+      const heroes = this.chainHeroes;
 
-      if (availableHeroes.length === 0) {
+      if (heroes.length === 0) {
         addPartyMessage(
-          "All heroes are currently on adventures. Return to town to manage your roster."
+          "No on-chain heroes yet. Summon allies in town to build your roster."
         );
         partyList.destroy();
         this.footerPartyMask = undefined;
         this.footerPartyMaskRect = undefined;
       } else {
-        availableHeroes.forEach((hero) => {
+        heroes.forEach((hero) => {
           const key = this.heroKey(hero);
           const selected = this.partySelection.has(key);
+          const lockStatus = this.heroLockStatuses.get(hero.account);
+          const isLocked = lockStatus?.isActive ?? false;
+
           const button = this.createFooterChip(
             0,
             partyY,
             PARTY_COL_WIDTH,
             `Hero #${hero.id} (${getHeroTypeLabel(hero.heroType)})`,
             () => this.toggleHero(key),
-            selected
+            selected,
+            isLocked
           );
           partyList.add(button);
           partyY += BUTTON_DIMENSIONS.height + 6;
@@ -995,7 +1004,8 @@ export class EmbarkScene extends Phaser.Scene {
     width: number,
     label: string,
     handler: () => void,
-    active: boolean
+    active: boolean,
+    isLocked = false
   ) {
     const container = this.add.container(x, y);
     const rect = this.add
@@ -1007,7 +1017,21 @@ export class EmbarkScene extends Phaser.Scene {
         active ? 0x395a85 : 0x222735
       )
       .setOrigin(0);
-    rect.setStrokeStyle(1, 0x3b4254, 1);
+
+    if (isLocked) {
+      rect.setStrokeStyle(2, 0xff4444, 1);
+      this.tweens.add({
+        targets: rect,
+        alpha: { from: 1, to: 0.7 },
+        duration: 1000,
+        ease: "Sine.easeInOut",
+        yoyo: true,
+        repeat: -1,
+      });
+    } else {
+      rect.setStrokeStyle(1, 0x3b4254, 1);
+    }
+
     rect
       .setInteractive({ cursor: "pointer" })
       .on("pointerover", () => rect.setFillStyle(0x395a85))
@@ -1120,8 +1144,21 @@ export class EmbarkScene extends Phaser.Scene {
     snapshot: Partial<HeroRosterSnapshot> | undefined
   ) {
     if (!snapshot) return;
+    if (snapshot.heroLockStatuses) {
+      this.heroLockStatuses = snapshot.heroLockStatuses;
+    }
     if (snapshot.heroes) {
-      this.chainHeroes = [...snapshot.heroes].sort((a, b) => a.id - b.id);
+      this.chainHeroes = [...snapshot.heroes].sort((a, b) => {
+        const aStatus = this.heroLockStatuses.get(a.account);
+        const bStatus = this.heroLockStatuses.get(b.account);
+        const aActive = aStatus?.isActive ?? false;
+        const bActive = bStatus?.isActive ?? false;
+
+        if (aActive === bActive) {
+          return a.id - b.id;
+        }
+        return aActive ? -1 : 1;
+      });
     }
     if (typeof snapshot.heroesLoading === "boolean") {
       this.heroesLoading = snapshot.heroesLoading;
@@ -1133,7 +1170,7 @@ export class EmbarkScene extends Phaser.Scene {
       const nextWallet = snapshot.walletAddress;
       const changed = this.walletAddress !== nextWallet;
       this.walletAddress = nextWallet;
-      if (changed) {
+      if (changed && this.contentRoot) {
         void this.loadDungeons(true);
       }
     }

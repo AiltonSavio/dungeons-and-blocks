@@ -621,6 +621,29 @@ export class TownScene extends Phaser.Scene {
         }
       );
       panel.add(disconnectBtn);
+
+      const copyBtn = createButton(
+        this,
+        210,
+        offset,
+        150,
+        "Copy Address",
+        () => {
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(address).then(
+              () => {
+                this.showToast("Address copied to clipboard!");
+              },
+              () => {
+                this.showToast("Failed to copy address.");
+              }
+            );
+          } else {
+            this.showToast("Clipboard API not available.");
+          }
+        }
+      );
+      panel.add(copyBtn);
     });
 
     if (balanceText) {
@@ -1857,7 +1880,8 @@ export class TownScene extends Phaser.Scene {
       .rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.55)
       .setOrigin(0)
       .setDepth(80)
-      .setInteractive();
+      .setInteractive()
+      .on("pointerdown", () => this.closeModal());
 
     // panel container
     this.modalPanel = this.add.container(0, 0).setDepth(81);
@@ -1865,6 +1889,7 @@ export class TownScene extends Phaser.Scene {
     // temp bg with base size (we'll relayout after measuring)
     const bg = this.add.rectangle(0, 0, baseW, baseH, 0x1a1f2b).setOrigin(0);
     bg.setStrokeStyle(2, 0x3c4252, 1);
+    bg.setInteractive();
     this.modalPanel.add(bg);
 
     // title
@@ -2573,7 +2598,55 @@ export class TownScene extends Phaser.Scene {
 
   private openMarket() {
     this.openModal("Night Market", (panel) => {
-      panel.add(
+      let currentTab: "market" | "players" = "market";
+
+      const marketContainer = this.add.container(0, 40);
+      const playersContainer = this.add.container(0, 40).setVisible(false);
+
+      const comingSoonText = this.add
+        .text(220, 150, "Coming Soon", {
+          ...UI_FONT.heading,
+          align: "center",
+        })
+        .setOrigin(0.5);
+      playersContainer.add(comingSoonText);
+
+      const marketTab = this.add
+        .text(0, 0, "Market", { ...UI_FONT.body, fontSize: "18px" })
+        .setInteractive({ cursor: "pointer" });
+
+      const playersTab = this.add
+        .text(marketTab.width + 24, 0, "Players Market", {
+          ...UI_FONT.body,
+          fontSize: "18px",
+        })
+        .setInteractive({ cursor: "pointer" });
+
+      const updateTabs = () => {
+        marketTab.setColor(currentTab === "market" ? "#ffe28a" : "#c1c6db");
+        playersTab.setColor(currentTab === "players" ? "#ffe28a" : "#c1c6db");
+        marketContainer.setVisible(currentTab === "market");
+        playersContainer.setVisible(currentTab === "players");
+      };
+
+      marketTab.on("pointerdown", () => {
+        currentTab = "market";
+        updateTabs();
+      });
+
+      playersTab.on("pointerdown", () => {
+        currentTab = "players";
+        updateTabs();
+      });
+
+      panel.add(marketTab);
+      panel.add(playersTab);
+      panel.add(marketContainer);
+      panel.add(playersContainer);
+
+      updateTabs();
+
+      marketContainer.add(
         this.add
           .text(
             0,
@@ -2588,7 +2661,7 @@ export class TownScene extends Phaser.Scene {
       MARKET_ITEMS.forEach((item: ItemDefinition) => {
         const owned = this.store.getInventory().items[item.id] ?? 0;
 
-        panel.add(
+        marketContainer.add(
           this.add
             .text(0, offset, `${item.name} — ${item.description}`, {
               ...UI_FONT.body,
@@ -2596,15 +2669,15 @@ export class TownScene extends Phaser.Scene {
             })
             .setOrigin(0, 0)
         );
-        offset += 20;
+        offset += 28;
 
-        panel.add(
+        marketContainer.add(
           this.add
             .text(0, offset, `Owned: ${owned}`, UI_FONT.caption)
             .setOrigin(0, 0)
         );
 
-        panel.add(
+        marketContainer.add(
           createButton(
             this,
             240,
@@ -2616,7 +2689,7 @@ export class TownScene extends Phaser.Scene {
             }
           )
         );
-        panel.add(
+        marketContainer.add(
           createButton(
             this,
             360,

@@ -8,7 +8,7 @@ import {
 import { ROSTER_WIDTH } from "./constants";
 import { UI_FONT } from "../../ui/uiConfig";
 import { clamp } from "./utils";
-import { formatHeroRowStats, formatHeroTimestamp } from "./heroFormatting";
+import { formatHeroTimestamp } from "./heroFormatting";
 import type { HeroLockStatus } from "../../state/adventureChain";
 
 type RosterPanelOptions = {
@@ -299,7 +299,7 @@ export class RosterPanel {
       return;
     }
 
-    const rowHeight = 84;
+    const rowHeight = 98;
     const gap = 10;
     let offsetY = 0;
     const heroPositions = new Map<number, number>();
@@ -346,7 +346,7 @@ export class RosterPanel {
     const lockStatus = this.state.heroLockStatuses?.get(hero.account);
     const isActive = lockStatus?.isActive ?? false;
 
-    const bg = this.scene.add.rectangle(0, 0, width, 84, 0x232737).setOrigin(0);
+    const bg = this.scene.add.rectangle(0, 0, width, 98, 0x232737).setOrigin(0);
 
     // If hero is active, add glowing red border
     if (isActive) {
@@ -419,7 +419,7 @@ export class RosterPanel {
     );
     container.add(
       this.scene.add
-        .text(12, 58, `HP ${hero.currentHp} / ${hero.maxHp}`, {
+        .text(12, 58, `HP ${hero.currentHp}/${hero.maxHp}`, {
           ...UI_FONT.caption,
           color: "#9cbcaa",
         })
@@ -427,7 +427,24 @@ export class RosterPanel {
     );
     container.add(
       this.scene.add
-        .text(width - 12, 58, formatHeroRowStats(hero), {
+        .text(width - 12, 58, `ATK ${hero.attack}`, {
+          ...UI_FONT.caption,
+          color: "#9fa6c0",
+          align: "right",
+        })
+        .setOrigin(1, 0)
+    );
+    container.add(
+      this.scene.add
+        .text(12, 72, `DEF ${hero.defense}`, {
+          ...UI_FONT.caption,
+          color: "#9fa6c0",
+        })
+        .setOrigin(0, 0)
+    );
+    container.add(
+      this.scene.add
+        .text(width - 12, 72, `MAG ${hero.magic}`, {
           ...UI_FONT.caption,
           color: "#9fa6c0",
           align: "right",
