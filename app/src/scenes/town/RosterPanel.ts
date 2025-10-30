@@ -511,16 +511,6 @@ export class RosterPanel {
       color: "#94c7ff",
     });
 
-    const skills =
-      hero.skills
-        .map((skill) => skill.name || `Skill ${skill.id}`)
-        .join(", ") || "Unrevealed";
-    addLine(`Skills: ${skills}`, {
-      ...UI_FONT.caption,
-      color: "#c1c6db",
-      wordWrap: { width: width - 24 },
-    });
-
     const positiveTraits = hero.positiveQuirks.length
       ? hero.positiveQuirks.map((id) => getQuirkLabel(id)).join(", ")
       : "None recorded.";

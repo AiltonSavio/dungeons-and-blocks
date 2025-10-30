@@ -22,8 +22,12 @@ import {
   deriveAdventurePda,
   createSetDelegateInstruction,
   type HeroLockStatus,
+  createDelegateAdventureInstruction,
 } from "../state/adventureChain";
-import { fetchPlayerEconomy, createInitializeEconomyInstruction } from "../state/economyChain";
+import {
+  fetchPlayerEconomy,
+  createInitializeEconomyInstruction,
+} from "../state/economyChain";
 import {
   SAFE_MARGIN,
   UI_FONT,
@@ -102,6 +106,7 @@ export class EmbarkScene extends Phaser.Scene {
   private embarkBusy = false;
   private walletProvider?: SolanaProvider;
   private solanaConnection?: Connection;
+  private ephemeralConnection?: Connection;
 
   private safe = SAFE_MARGIN;
   private contentWidth = 0;
@@ -790,7 +795,7 @@ export class EmbarkScene extends Phaser.Scene {
     owned.forEach((dungeon) => {
       const card = this.buildDungeonCard(
         dungeon.metadata.name || `Dungeon #${dungeon.mintId}`,
-        `Size ${dungeon.gridWidth}×${dungeon.gridHeight} • Seed ${dungeon.seed}`,
+        `Size ${dungeon.gridWidth}×${dungeon.gridHeight}`,
         String(dungeon.seed),
         [
           {
@@ -1304,7 +1309,8 @@ export class EmbarkScene extends Phaser.Scene {
     }
 
     const connection = this.getSolanaConnection();
-    if (!connection) {
+    const ephemeralConnection = this.getEphemeralConnection();
+    if (!connection || !ephemeralConnection) {
       this.store.toast("RPC unavailable.");
       return;
     }
@@ -1330,7 +1336,7 @@ export class EmbarkScene extends Phaser.Scene {
     try {
       existingAdventure = await fetchAdventureSessionSmart(
         connection,
-        null,
+        ephemeralConnection,
         adventurePda
       );
     } catch (err) {
@@ -1489,6 +1495,16 @@ export class EmbarkScene extends Phaser.Scene {
         }
       );
 
+      // Delegate the PDA to the ephemeral rollup
+      const { instruction: delegateIx } =
+        await createDelegateAdventureInstruction({
+          connection,
+          payer: playerKey,
+          adventurePda,
+          owner: playerKey,
+          dungeonMint: dungeonPubkey,
+        });
+
       const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
         units: 800_000,
       });
@@ -1496,14 +1512,20 @@ export class EmbarkScene extends Phaser.Scene {
       const instructions: TransactionInstruction[] = [computeIx];
 
       // Check if player economy account exists, if not, add initialization instruction
-      const playerEconomyAccount = await fetchPlayerEconomy(connection, playerKey);
+      const playerEconomyAccount = await fetchPlayerEconomy(
+        connection,
+        playerKey
+      );
       if (!playerEconomyAccount) {
-        console.log("[EmbarkScene] Player economy account not found, adding initialization instruction.");
-        const initializeEconomyIx = createInitializeEconomyInstruction(playerKey);
+        console.log(
+          "[EmbarkScene] Player economy account not found, adding initialization instruction."
+        );
+        const initializeEconomyIx =
+          createInitializeEconomyInstruction(playerKey);
         instructions.push(initializeEconomyIx);
       }
 
-      instructions.push(startIx, setDelegateIx);
+      instructions.push(startIx, setDelegateIx, delegateIx);
 
       // Transaction: Create adventure on main chain and set delegate
       console.log("[EmbarkScene] Creating adventure on main chain...");
@@ -1646,13 +1668,34 @@ export class EmbarkScene extends Phaser.Scene {
     const owner = new PublicKey(this.walletAddress);
     this.dungeonProgramBusy = true;
     try {
+      const existingDungeonMintIds = new Set(this.myDungeons.map(d => d.mintId));
+
       const { instruction } = await createMintDungeonInstruction({
         connection,
         payer: owner,
       });
       await this.sendProgramTransaction([instruction]);
       this.store.toast("Dungeon mint requested. Awaiting VRF settlement.");
-      await this.loadDungeons(true);
+
+      let dungeonReady = false;
+      for (let i = 0; i < 10; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await this.loadDungeons(true);
+
+        const newlyMintedAndReadyDungeon = this.myDungeons.find(d =>
+          !existingDungeonMintIds.has(d.mintId) && d.status === "ready"
+        );
+
+        if (newlyMintedAndReadyDungeon) {
+          this.store.toast(`Dungeon #${newlyMintedAndReadyDungeon.mintId} is ready!`);
+          dungeonReady = true;
+          break;
+        }
+      }
+
+      if (!dungeonReady) {
+        this.store.toast("VRF settlement for dungeon timed out. Please check back later.");
+      }
     } catch (err) {
       this.handleProgramError(err, "Failed to mint dungeon.");
     } finally {
@@ -1733,6 +1776,25 @@ export class EmbarkScene extends Phaser.Scene {
       this.solanaConnection = new Connection(endpoint, "confirmed");
     }
     return this.solanaConnection;
+  }
+
+  private getEphemeralConnection(): Connection | undefined {
+    if (typeof window === "undefined") return undefined;
+    if (!this.ephemeralConnection) {
+      const env =
+        (import.meta as unknown as { env?: Record<string, string | undefined> })
+          .env ?? {};
+      const http =
+        env.VITE_MAGICBLOCK_RPC_URL ??
+        (window as unknown as { __DNB_MAGICBLOCK_RPC__?: string })
+          .__DNB_MAGICBLOCK_RPC__ ??
+        "https://devnet.magicblock.app";
+      this.ephemeralConnection = new Connection(http, {
+        commitment: "processed",
+        confirmTransactionInitialTimeout: 20_000,
+      } as any);
+    }
+    return this.ephemeralConnection;
   }
 
   private async sendProgramTransaction(

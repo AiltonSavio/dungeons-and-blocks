@@ -1115,36 +1115,6 @@ fn execute_hero_action(
     Ok(())
 }
 
-fn resolve_enemy_target_idx(combat: &mut AdventureCombat, requested: Option<u8>) -> Result<usize> {
-    if let Some(ix) = requested {
-        let idx = ix as usize;
-        if idx < combat.enemy_count as usize && combat.enemies[idx].alive {
-            return Ok(idx);
-        }
-
-        let len = combat.enemy_count as usize;
-        if len > 0 {
-            for step in 1..=len {
-                let j = (idx + step) % len;
-                if combat.enemies[j].alive {
-                    return Ok(j);
-                }
-            }
-        }
-    } else {
-    }
-
-    // Fallback: first alive
-    if let Some(idx) = first_alive_enemy_index(combat) {
-        return Ok(idx);
-    }
-
-    // None alive → Victory
-    combat.pending_resolution = CombatResolutionState::Victory;
-    combat.active = false;
-    Ok(0)
-}
-
 fn execute_enemy_auto_turn(
     _adventure: &mut AdventureSession,
     combat: &mut AdventureCombat,
