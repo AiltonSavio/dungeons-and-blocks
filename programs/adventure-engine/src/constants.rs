@@ -31,7 +31,7 @@ pub const POUCH_GOLD_VALUE: u64 = 25;
 pub const DUNGEON_FEE_BPS: u64 = 300; // 3%
 pub const BPS_DENOMINATOR: u64 = 10_000;
 
-pub const ENCOUNTER_BASE_BPS: u16 = 2000; // 20%
+pub const ENCOUNTER_BASE_BPS: u16 = 1000; // 10%
 pub const ENCOUNTER_MIN_TORCH: u8 = 5;
 pub const ENCOUNTER_MAX_TORCH: u8 = 100;
 pub const ENCOUNTER_TORCH_SLOPE_BPS: i16 = 60; // each torch drop point adds 0.6%

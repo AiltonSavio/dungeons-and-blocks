@@ -158,7 +158,7 @@ pub fn convert_hero_snapshot(snapshot: &HeroSnapshot, index: usize, torch: u8) -
 
 pub fn spawn_enemy(kind: u8, torch: u8) -> EnemyCombatant {
     let def = get_enemy_definition(kind);
-    let enemy = EnemyCombatant {
+    let mut enemy = EnemyCombatant {
         kind,
         alive: true,
         ap: ENEMY_AP_MAX,
@@ -173,6 +173,15 @@ pub fn spawn_enemy(kind: u8, torch: u8) -> EnemyCombatant {
         statuses: [StatusInstance::default(); MAX_STATUS_PER_COMBATANT],
         threat: 0,
     };
+
+    // Nerf enemy stats by 25%
+    enemy.max_hp = enemy.max_hp * 75 / 100;
+    enemy.hp = enemy.hp.min(enemy.max_hp);
+    enemy.attack = enemy.attack * 75 / 100;
+    enemy.defense = enemy.defense * 75 / 100;
+    enemy.magic = enemy.magic * 75 / 100;
+    enemy.resistance = enemy.resistance * 75 / 100;
+
     enemy
 }
 
@@ -207,11 +216,11 @@ fn get_enemy_definition(kind: u8) -> &'static EnemyDefinition {
 
 fn convert_hp(value: u8, level: u8) -> u16 {
     let base = 18u16 + (level as u16 * 6);
-    base + (value as u16 * 2 / 3)
+    base + (value as u16 * 4 / 5)
 }
 
 fn convert_core_stat(value: u8) -> u16 {
-    6 + ((value as u16 * 16) / 100)
+    8 + ((value as u16 * 20) / 100)
 }
 
 fn apply_hero_torch_bonuses(hero: &mut HeroCombatant, torch: u8) {
