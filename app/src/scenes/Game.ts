@@ -205,6 +205,7 @@ export default class Game extends Phaser.Scene {
   private adventureFetchPromise?: Promise<ChainAdventure | null>;
   private adventurePda?: PublicKey;
   private solanaConnection?: Connection;
+  private ephemeralConnection?: Connection;
   private playerPublicKey?: PublicKey;
   private tempKeypair?: Keypair;
   private tempWalletAdapter?: {
@@ -787,8 +788,9 @@ export default class Game extends Phaser.Scene {
   private async processMovementQueue(): Promise<void> {
     if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair)
       return;
+    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!connection) {
+    if (!connection || !eph) {
       console.warn("[Game] Connection unavailable for movement");
       this.rollbackToConfirmed();
       return;
@@ -823,22 +825,19 @@ export default class Game extends Phaser.Scene {
       for (let attempt = 0; attempt < maxRetries && !success; attempt++) {
         try {
           const { blockhash, lastValidBlockHeight } =
-            await connection.getLatestBlockhash("confirmed");
+            await eph.getLatestBlockhash("confirmed");
           const tx = new Transaction();
           tx.feePayer = this.tempKeypair.publicKey;
           tx.recentBlockhash = blockhash;
           tx.add(ix);
           tx.sign(this.tempKeypair);
 
-          const signature = await connection.sendRawTransaction(
-            tx.serialize(),
-            {
-              skipPreflight: false,
-            }
-          );
+          const signature = await eph.sendRawTransaction(tx.serialize(), {
+            skipPreflight: false,
+          });
 
           const t0 = performance.now();
-          await connection.confirmTransaction(
+          await eph.confirmTransaction(
             { signature, blockhash, lastValidBlockHeight },
             "confirmed"
           );
@@ -856,7 +855,7 @@ export default class Game extends Phaser.Scene {
           // Refresh adventure state from base layer
           const updated = await fetchAdventureSessionSmart(
             connection,
-            null,
+            eph,
             this.adventurePda
           );
           if (updated) {
@@ -1206,8 +1205,9 @@ export default class Game extends Phaser.Scene {
   private async tryOpenChestOnChain(chest: Chest): Promise<boolean> {
     if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair)
       return false;
+    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!connection) return false;
+    if (!connection || !eph) return false;
 
     try {
       const ix = await createOpenChestInstruction({
@@ -1218,26 +1218,27 @@ export default class Game extends Phaser.Scene {
         chestIndex: chest.index,
       });
 
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await eph.getLatestBlockhash(
+        "confirmed"
+      );
       const tx = new Transaction();
       tx.feePayer = this.tempKeypair.publicKey;
       tx.recentBlockhash = blockhash;
       tx.add(ix);
       tx.sign(this.tempKeypair);
 
-      const signature = await connection.sendRawTransaction(tx.serialize(), {
+      const signature = await eph.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
       });
 
-      await connection.confirmTransaction(
+      await eph.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
         "confirmed"
       );
 
       const updated = await fetchAdventureSessionSmart(
         connection,
-        null,
+        eph,
         this.adventurePda
       );
 
@@ -1456,8 +1457,9 @@ export default class Game extends Phaser.Scene {
       return validation;
     }
 
+    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!connection) {
+    if (!connection || !eph) {
       return { success: false, error: "Connection unavailable." };
     }
 
@@ -1494,19 +1496,20 @@ export default class Game extends Phaser.Scene {
         return { success: true };
       }
 
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await eph.getLatestBlockhash(
+        "confirmed"
+      );
       const tx = new Transaction();
       tx.feePayer = this.tempKeypair.publicKey;
       tx.recentBlockhash = blockhash;
       instructions.forEach((ix) => tx.add(ix));
       tx.sign(this.tempKeypair);
 
-      const signature = await connection.sendRawTransaction(tx.serialize(), {
+      const signature = await eph.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
       });
 
-      await connection.confirmTransaction(
+      await eph.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
         "confirmed"
       );
@@ -1805,6 +1808,9 @@ export default class Game extends Phaser.Scene {
         const dungeonMintPk = new PublicKey(this.adventureSession.dungeonMint);
         const dungeonOwnerPk = await this.resolveDungeonOwner(connection);
 
+        console.log("[Game] - dungeonMint:", dungeonMintPk.toBase58());
+        console.log("[Game] - dungeonOwner:", dungeonOwnerPk.toBase58());
+
         const ix = await createExitAdventureInstruction({
           connection,
           owner: this.playerPublicKey,
@@ -2059,8 +2065,9 @@ export default class Game extends Phaser.Scene {
       this.isWaitingForCombat = false;
       return;
     }
+    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!connection) {
+    if (!connection || !eph) {
       this.isWaitingForCombat = false;
       return;
     }
@@ -2081,8 +2088,9 @@ export default class Game extends Phaser.Scene {
         authority: this.tempKeypair.publicKey,
         adventureKey: this.adventurePda,
       });
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await eph.getLatestBlockhash(
+        "confirmed"
+      );
 
       const tx = new Transaction({
         feePayer: this.tempKeypair.publicKey,
@@ -2091,11 +2099,30 @@ export default class Game extends Phaser.Scene {
       tx.add(ix);
       tx.sign(this.tempKeypair);
 
-      const signature = await connection.sendRawTransaction(tx.serialize(), {
+      // Simulate first
+      console.log("Attempting transaction simulation...");
+      try {
+        const simulation = await eph.simulateTransaction(tx);
+        if (simulation.value.err) {
+          console.error("Simulation error:", simulation.value.err);
+          console.error("Simulation logs:", simulation.value.logs);
+          throw new Error(
+            `Simulation failed: ${JSON.stringify(simulation.value.err)}`
+          );
+        } else {
+          console.log("Simulation successful");
+          console.log("Simulation logs:", simulation.value.logs);
+        }
+      } catch (simErr) {
+        console.error("Simulation attempt failed:", simErr);
+        throw new Error("Transaction simulation failed.");
+      }
+
+      const signature = await eph.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
       });
 
-      await connection.confirmTransaction(
+      await eph.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
         "confirmed"
       );
@@ -2108,6 +2135,7 @@ export default class Game extends Phaser.Scene {
         adventureKey: this.adventurePda.toBase58(),
         ownerKey: this.playerPublicKey.toBase58(),
         connection,
+        ephemeralConnection: eph,
         authority: authorityAdapter,
         heroClasses: this.getHeroClassKeysForCombat(),
       });
@@ -2133,8 +2161,9 @@ export default class Game extends Phaser.Scene {
       this.isWaitingForCombat = false;
       return;
     }
+    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!connection) {
+    if (!connection || !eph) {
       this.isWaitingForCombat = false;
       return;
     }
@@ -2158,8 +2187,9 @@ export default class Game extends Phaser.Scene {
         adventureKey: this.adventurePda,
       });
 
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await eph.getLatestBlockhash(
+        "confirmed"
+      );
       const tx = new Transaction({
         feePayer: this.tempKeypair.publicKey,
         recentBlockhash: blockhash,
@@ -2167,17 +2197,17 @@ export default class Game extends Phaser.Scene {
       tx.add(ix);
       tx.sign(this.tempKeypair);
 
-      const signature = await connection.sendRawTransaction(tx.serialize(), {
+      const signature = await eph.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
       });
-      await connection.confirmTransaction(
+      await eph.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
         "confirmed"
       );
 
       const updated = await fetchAdventureSessionSmart(
         connection,
-        null,
+        eph,
         this.adventurePda
       );
       if (updated) {
@@ -2285,6 +2315,26 @@ export default class Game extends Phaser.Scene {
       this.solanaConnection = new Connection(endpoint, "confirmed");
     }
     return this.solanaConnection;
+  }
+
+  private getEphemeralConnection(): Connection | undefined {
+    if (typeof window === "undefined") return undefined;
+    if (!this.ephemeralConnection) {
+      const env =
+        (import.meta as unknown as { env?: Record<string, string | undefined> })
+          .env ?? {};
+      const http =
+        env.VITE_MAGICBLOCK_RPC_URL ??
+        (window as unknown as { __DNB_MAGICBLOCK_RPC__?: string })
+          .__DNB_MAGICBLOCK_RPC__ ??
+        "https://devnet.magicblock.app";
+
+      this.ephemeralConnection = new Connection(http, {
+        commitment: "processed",
+        confirmTransactionInitialTimeout: 20_000,
+      } as any);
+    }
+    return this.ephemeralConnection;
   }
 
   private initializeTempKeypair(): void {
@@ -2608,22 +2658,7 @@ export default class Game extends Phaser.Scene {
       // subtle shadow for readability
       text.setShadow(1, 1, "#000000", 2, false, true);
 
-      // add a faint separator line for each hero block
-      const sep = this.add
-        .rectangle(
-          startX,
-          cursorY + text.height + 4,
-          maxWidth + 40,
-          1,
-          0xffffff,
-          0.15
-        )
-        .setOrigin(0, 0)
-        .setScrollFactor(0)
-        .setDepth(10_000);
-
       this.uiLayer.add(text);
-      this.uiLayer.add(sep);
 
       maxWidth = Math.max(maxWidth, text.width);
       cursorY += text.height + lineGap + 10; // ↑ extra gap between heroes
@@ -3056,8 +3091,9 @@ export default class Game extends Phaser.Scene {
       return;
     }
 
+    const eph = this.getEphemeralConnection();
     const connection = this.getSolanaConnection();
-    if (!connection) {
+    if (!connection || !eph) {
       console.warn("[Game] Connection not available for item use");
       return;
     }
@@ -3078,26 +3114,27 @@ export default class Game extends Phaser.Scene {
         quantity: 1,
       });
 
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
+      const { blockhash, lastValidBlockHeight } = await eph.getLatestBlockhash(
+        "confirmed"
+      );
       const tx = new Transaction();
       tx.feePayer = this.tempKeypair.publicKey;
       tx.recentBlockhash = blockhash;
       tx.add(ix);
       tx.sign(this.tempKeypair);
 
-      const signature = await connection.sendRawTransaction(tx.serialize(), {
+      const signature = await eph.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
       });
 
-      await connection.confirmTransaction(
+      await eph.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
         "confirmed"
       );
 
       const updated = await fetchAdventureSessionSmart(
         connection,
-        null,
+        eph,
         this.adventurePda
       );
 

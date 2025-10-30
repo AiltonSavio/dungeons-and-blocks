@@ -27,6 +27,7 @@ export interface CombatSigner {
  */
 export interface CombatContext {
   connection: Connection;
+  ephemeralConnection: Connection;
   owner: PublicKey;
   authority: CombatSigner;
   adventureKey: PublicKey;

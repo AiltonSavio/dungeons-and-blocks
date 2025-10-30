@@ -53,7 +53,7 @@ export const BUILDINGS: BuildingDef[] = [
   {
     key: "guild",
     label: "Guild",
-    caption: "Train & equip skills",
+    caption: "Level up & retire heroes",
     col: 2,
     row: 1,
   },

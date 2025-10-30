@@ -35,6 +35,7 @@ interface CombatInitData {
   adventureKey: string;
   ownerKey: string;
   connection: Connection;
+  ephemeralConnection: Connection;
   authority: {
     publicKey: PublicKey;
     signTransaction?: (tx: Transaction) => Promise<Transaction>;
@@ -104,6 +105,7 @@ export default class Combat extends Phaser.Scene {
   init(data: CombatInitData) {
     this.ctx = {
       connection: data.connection,
+      ephemeralConnection: data.ephemeralConnection,
       owner: new PublicKey(data.ownerKey),
       authority: data.authority,
       adventureKey: new PublicKey(data.adventureKey),
@@ -1400,7 +1402,7 @@ export default class Combat extends Phaser.Scene {
         targetSide,
       };
       const sig = await submitCombatAction(this.ctx, options, async (tx) => {
-        const { blockhash } = await this.ctx.connection.getLatestBlockhash(
+        const { blockhash } = await this.ctx.ephemeralConnection.getLatestBlockhash(
           "confirmed"
         );
         tx.recentBlockhash = blockhash;
@@ -1408,7 +1410,7 @@ export default class Combat extends Phaser.Scene {
 
         console.log("Attempting transaction simulation...");
         try {
-          const simulation = await this.ctx.connection.simulateTransaction(tx);
+          const simulation = await this.ctx.ephemeralConnection.simulateTransaction(tx);
           if (simulation.value.err) {
             console.error("Simulation error:", simulation.value.err);
             console.error("Simulation logs:", simulation.value.logs);
@@ -1432,7 +1434,7 @@ export default class Combat extends Phaser.Scene {
           return typeof result === "string" ? result : result.signature;
         } else if (this.ctx.authority.signTransaction) {
           const signed = await this.ctx.authority.signTransaction(tx);
-          return await this.ctx.connection.sendRawTransaction(
+          return await this.ctx.ephemeralConnection.sendRawTransaction(
             signed.serialize()
           );
         } else {
@@ -1442,8 +1444,8 @@ export default class Combat extends Phaser.Scene {
 
       // Wait for confirmation
       const { blockhash, lastValidBlockHeight } =
-        await this.ctx.connection.getLatestBlockhash("confirmed");
-      await this.ctx.connection.confirmTransaction({
+        await this.ctx.ephemeralConnection.getLatestBlockhash("confirmed");
+      await this.ctx.ephemeralConnection.confirmTransaction({
         signature: sig,
         blockhash,
         lastValidBlockHeight,
@@ -1481,7 +1483,7 @@ export default class Combat extends Phaser.Scene {
     // Conclude combat on-chain (applies rewards)
     try {
       const sig = await concludeCombat(this.ctx, async (tx) => {
-        const { blockhash } = await this.ctx.connection.getLatestBlockhash(
+        const { blockhash } = await this.ctx.ephemeralConnection.getLatestBlockhash(
           "confirmed"
         );
         tx.recentBlockhash = blockhash;
@@ -1492,7 +1494,7 @@ export default class Combat extends Phaser.Scene {
           return typeof result === "string" ? result : result.signature;
         } else if (this.ctx.authority.signTransaction) {
           const signed = await this.ctx.authority.signTransaction(tx);
-          return await this.ctx.connection.sendRawTransaction(
+          return await this.ctx.ephemeralConnection.sendRawTransaction(
             signed.serialize()
           );
         } else {
@@ -1501,8 +1503,8 @@ export default class Combat extends Phaser.Scene {
       });
 
       const { blockhash, lastValidBlockHeight } =
-        await this.ctx.connection.getLatestBlockhash("confirmed");
-      await this.ctx.connection.confirmTransaction({
+        await this.ctx.ephemeralConnection.getLatestBlockhash("confirmed");
+      await this.ctx.ephemeralConnection.confirmTransaction({
         signature: sig,
         blockhash,
         lastValidBlockHeight,

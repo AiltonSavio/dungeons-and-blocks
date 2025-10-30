@@ -786,15 +786,34 @@ export class TownScene extends Phaser.Scene {
           ? "Summon request submitted. Awaiting VRF callback."
           : "Paid summon submitted. Awaiting VRF callback.";
       this.showToast(toastMessage);
-      await this.loadHeroes(this.walletAddress);
-      if (this.modalPanel) {
-        this.closeModal();
-        this.openTavern();
+
+      let heroArrived = false;
+      for (let i = 0; i < 10; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await this.loadHeroes(this.walletAddress);
+        if (
+          this.playerProfile &&
+          this.playerProfile.heroCount > profile.heroCount
+        ) {
+          this.showToast("A new hero has arrived!");
+          heroArrived = true;
+          break;
+        }
+      }
+
+      if (!heroArrived) {
+        this.showToast(
+          "VRF callback confirmation timed out. Please check back later."
+        );
       }
     } catch (err) {
       this.handleProgramError(err, "Failed to mint hero.");
     } finally {
       this.programBusy = false;
+      if (this.modalPanel) {
+        this.closeModal();
+        this.openTavern();
+      }
     }
   }
 
@@ -1207,7 +1226,7 @@ export class TownScene extends Phaser.Scene {
       this.showToast(`Vault credited with ${HOURLY_GRANT_AMOUNT} gold.`);
 
       // Add a small delay to allow for blockchain propagation
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       // Sync from chain to update local state
       await this.syncEconomyFromChain();
@@ -1327,7 +1346,7 @@ export class TownScene extends Phaser.Scene {
       this.showToast(`Purchased 1x ${itemId.replace("_", " ")}.`);
 
       // Add a small delay to allow for blockchain propagation
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       // Sync from chain to update local state
       await this.syncEconomyFromChain();
@@ -1374,7 +1393,7 @@ export class TownScene extends Phaser.Scene {
       this.showToast(`Sold 1x ${itemId.replace("_", " ")}.`);
 
       // Add a small delay to allow for blockchain propagation
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       // Sync from chain to update local state
       await this.syncEconomyFromChain();
@@ -2524,25 +2543,12 @@ export class TownScene extends Phaser.Scene {
           .setOrigin(0, 0);
         block.add(header);
 
-        const skills =
-          hero.skills
-            .map((skill) => skill.name || `Skill ${skill.id}`)
-            .join(", ") || "Unrevealed";
-        const body = this.add
-          .text(0, header.height + 4, skills, {
-            ...UI_FONT.caption,
-            color: "#c1c6db",
-            wordWrap: { width: 432 },
-          })
-          .setOrigin(0, 0);
-        block.add(body);
-
         const nextLevel = getNextLevelRequirement(hero);
         const requirementLabel = nextLevel
           ? `Next: Level ${nextLevel.targetLevel} (XP > ${nextLevel.requiredExperience})`
           : "Maximum level reached";
         const requirementText = this.add
-          .text(0, body.y + body.height + 6, requirementLabel, {
+          .text(0, header.height + 6, requirementLabel, {
             ...UI_FONT.caption,
             color: nextLevel ? "#9fa6c0" : "#6f758c",
           })
@@ -2589,7 +2595,7 @@ export class TownScene extends Phaser.Scene {
           0,
           blockBottom + 8,
           140,
-          "Burn Hero",
+          "Retire Hero",
           () => this.burnHero(hero),
           !locked && !this.programBusy
         );

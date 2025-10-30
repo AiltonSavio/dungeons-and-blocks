@@ -23,23 +23,9 @@ export const HERO_CORE_PROGRAM_ID = new PublicKey(
 export const PLAYER_ECONOMY_PROGRAM_ID = new PublicKey(
   "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
 );
-// MagicBlock delegation endpoints retained for future reactivation.
-// export const DELEGATION_PROGRAM_ID = new PublicKey(
-//   "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-// );
-// export const MAGIC_PROGRAM_ID = new PublicKey(
-//   "Magic11111111111111111111111111111111111111"
-// );
-// export const MAGIC_CONTEXT_ID = new PublicKey(
-//   "MagicContext1111111111111111111111111111111"
-// );
 const ADVENTURE_SEED = Buffer.from("adventure");
 const HERO_LOCK_SEED = Buffer.from("hero-lock");
 const BUFFER_SEED = Buffer.from("buffer");
-// @ts-ignore
-const __DELEGATION_RECORD_SEED = Buffer.from("delegation");
-// @ts-ignore
-const __DELEGATION_METADATA_SEED = Buffer.from("delegation-metadata");
 const PLAYER_ECONOMY_SEED = Buffer.from("player_economy");
 
 // Create instruction coder
@@ -170,24 +156,6 @@ export function deriveAdventureBufferPda(
   );
 }
 
-// export function deriveDelegationRecordPda(
-//   adventure: PublicKey
-// ): [PublicKey, number] {
-//   return PublicKey.findProgramAddressSync(
-//     [DELEGATION_RECORD_SEED, adventure.toBuffer()],
-//     DELEGATION_PROGRAM_ID
-//   );
-// }
-
-// export function deriveDelegationMetadataPda(
-//   adventure: PublicKey
-// ): [PublicKey, number] {
-//   return PublicKey.findProgramAddressSync(
-//     [DELEGATION_METADATA_SEED, adventure.toBuffer()],
-//     DELEGATION_PROGRAM_ID
-//   );
-// }
-
 // ---------- Fetch & mapping ----------
 
 export async function fetchAdventureSession(
@@ -202,33 +170,34 @@ export async function fetchAdventureSession(
   return mapAdventureAccount(adventurePda, account);
 }
 
-// export async function isAdventureDelegated(
-//   connection: Connection,
-//   adventurePda: PublicKey
-// ): Promise<boolean> {
-//   try {
-//     const accountInfo = await connection.getAccountInfo(adventurePda);
-//     if (!accountInfo) return false;
-//
-//     // If delegated, the owner will be the delegation program, not the adventure program
-//     return !accountInfo.owner.equals(ADVENTURE_ENGINE_PROGRAM_ID);
-//   } catch (err) {
-//     console.error("[adventureChain] Failed to check delegation status:", err);
-//     return false;
-//   }
-// }
+export async function isAdventureDelegated(
+  connection: Connection,
+  adventurePda: PublicKey
+): Promise<boolean> {
+  try {
+    const info = await connection.getAccountInfo(adventurePda);
+    if (!info) return false;
+    return !info.owner.equals(ADVENTURE_ENGINE_PROGRAM_ID);
+  } catch (e) {
+    console.error("[adventureChain] isAdventureDelegated failed:", e);
+    return false;
+  }
+}
 
 /** Fetch adventure session directly from the base layer (MagicBlock disabled). */
 export async function fetchAdventureSessionSmart(
-  baseConnection: Connection,
-  _ephemeralConnection: Connection | null,
+  base: Connection,
+  ephem: Connection | null,
   adventurePda: PublicKey
 ): Promise<ChainAdventure | null> {
   try {
-    // MagicBlock delegation disabled: always read from base layer.
-    return fetchAdventureSession(baseConnection, adventurePda);
-  } catch (err) {
-    console.error("[adventureChain] Failed to fetch adventure:", err);
+    const delegated = await isAdventureDelegated(base, adventurePda);
+    if (delegated && ephem) {
+      return fetchAdventureSession(ephem, adventurePda);
+    }
+    return fetchAdventureSession(base, adventurePda);
+  } catch (e) {
+    console.error("[adventureChain] fetchAdventureSessionSmart error:", e);
     return null;
   }
 }
@@ -395,33 +364,27 @@ export async function createStartAdventureInstruction(options: {
   adventurePda: PublicKey;
   heroLockPdas: PublicKey[];
 }> {
-  const { player, dungeonMint, heroMints, items = [] } = options;
+  const { player, dungeonMint } = options;
+  const items = options.items ?? [];
 
-  // SORT THE HERO MINTS TO MATCH RUST CODE
-  const sortedHeroMints = [...heroMints].sort((a, b) => {
-    const aBytes = a.toBuffer();
-    const bBytes = b.toBuffer();
-    return aBytes.compare(bBytes);
-  });
-
-  const [adventurePda] = deriveAdventurePda(player, dungeonMint);
-  const heroLockPdas = sortedHeroMints.map(
-    (mint) => deriveHeroLockPda(mint)[0]
+  // Sort hero mints to match the program's sorting
+  const sortedHeroMints = [...options.heroMints].sort((a, b) =>
+    a.toBuffer().compare(b.toBuffer())
   );
 
-  // Derive player economy PDA
+  const [adventurePda] = deriveAdventurePda(player, dungeonMint);
+  const heroLockPdas = sortedHeroMints.map((m) => deriveHeroLockPda(m)[0]);
+
   const [playerEconomyPda] = PublicKey.findProgramAddressSync(
     [PLAYER_ECONOMY_SEED, player.toBuffer()],
     PLAYER_ECONOMY_PROGRAM_ID
   );
 
-  // Encode instruction using BorshInstructionCoder
   const data = instructionCoder.encode("start_adventure", {
     hero_mints: sortedHeroMints,
-    items: items,
+    items,
   });
 
-  // Build the account keys
   const keys = [
     { pubkey: player, isSigner: true, isWritable: true },
     { pubkey: dungeonMint, isSigner: false, isWritable: false },
@@ -432,35 +395,21 @@ export async function createStartAdventureInstruction(options: {
     { pubkey: PLAYER_ECONOMY_PROGRAM_ID, isSigner: false, isWritable: false },
   ];
 
-  // Add remaining accounts: [hero_mint, lock_pda] * N
+  // remaining: [heroMint, heroLock] * N (both writable)
   for (let i = 0; i < sortedHeroMints.length; i++) {
     const heroMint = sortedHeroMints[i];
     const lockPda = heroLockPdas[i];
-
-    keys.push({
-      pubkey: heroMint,
-      isSigner: false,
-      isWritable: true,
-    });
-
-    keys.push({
-      pubkey: lockPda,
-      isSigner: false,
-      isWritable: true,
-    });
+    keys.push({ pubkey: heroMint, isSigner: false, isWritable: true });
+    keys.push({ pubkey: lockPda, isSigner: false, isWritable: true });
   }
 
-  const instruction = new TransactionInstruction({
+  const ix = new TransactionInstruction({
     programId: ADVENTURE_ENGINE_PROGRAM_ID,
     keys,
     data,
   });
 
-  return {
-    instruction,
-    adventurePda,
-    heroLockPdas,
-  };
+  return { instruction: ix, adventurePda, heroLockPdas };
 }
 
 export async function createSetDelegateInstruction(options: {
@@ -497,26 +446,21 @@ export async function createDelegateAdventureInstruction(options: {
   dungeonMint: PublicKey;
   validator?: PublicKey;
 }): Promise<{ instruction: TransactionInstruction }> {
-  void options;
-  throw new Error(
-    "MagicBlock delegation is disabled while testing on main chain."
-  );
-}
+  const { connection, payer, adventurePda, owner, dungeonMint, validator } =
+    options;
+  const program = getAdventureProgram(connection, payer);
 
-export async function createProcessUndelegationInstruction(options: {
-  connection: Connection;
-  payer: PublicKey;
-  adventurePda: PublicKey;
-  owner: PublicKey;
-  dungeonMint: PublicKey;
-}): Promise<{
-  instruction: TransactionInstruction;
-  bufferPda: PublicKey;
-}> {
-  void options;
-  throw new Error(
-    "MagicBlock delegation is disabled while testing on main chain."
-  );
+  const rem = validator
+    ? [{ pubkey: validator, isSigner: false, isWritable: false }]
+    : [];
+
+  const ix = await program.methods
+    .delegateAdventure()
+    .accountsPartial({ payer, pda: adventurePda, owner, dungeonMint })
+    .remainingAccounts(rem)
+    .instruction();
+
+  return { instruction: ix };
 }
 
 // ---------- Moves ----------
@@ -611,14 +555,13 @@ export async function createExitAdventureInstruction(options: {
     heroMints,
     dungeonMint,
     dungeonOwner,
+    fromEphemeral = false,
   } = options;
   const program = getAdventureProgram(connection, owner);
 
-  const sortedHeroMints = [...heroMints].sort((a, b) => {
-    const aBytes = a.toBuffer();
-    const bBytes = b.toBuffer();
-    return aBytes.compare(bBytes);
-  });
+  const sortedHeroMints = [...heroMints].sort((a, b) =>
+    a.toBuffer().compare(b.toBuffer())
+  );
 
   const [playerEconomyPda] = PublicKey.findProgramAddressSync(
     [PLAYER_ECONOMY_SEED, owner.toBuffer()],
@@ -631,13 +574,18 @@ export async function createExitAdventureInstruction(options: {
   );
 
   // Always pass hero accounts to unlock them via CPI to hero-core
-  const remainingAccounts = sortedHeroMints.flatMap((heroMint) => {
-    const [heroLockPda] = deriveHeroLockPda(heroMint);
-    return [
-      { pubkey: heroMint, isSigner: false, isWritable: true },
-      { pubkey: heroLockPda, isSigner: false, isWritable: true },
-    ];
-  });
+  const remainingAccounts = [];
+
+  // Only add hero accounts as writable if not exiting from ephemeral
+  if (!fromEphemeral) {
+    for (const heroMint of sortedHeroMints) {
+      const [heroLockPda] = deriveHeroLockPda(heroMint);
+      remainingAccounts.push(
+        { pubkey: heroMint, isSigner: false, isWritable: true },
+        { pubkey: heroLockPda, isSigner: false, isWritable: true }
+      );
+    }
+  }
 
   remainingAccounts.push({
     pubkey: dungeonOwnerEconomyPda,
@@ -645,7 +593,7 @@ export async function createExitAdventureInstruction(options: {
     isWritable: true,
   });
 
-  const instruction = await program.methods
+  const ix = await program.methods
     .exitAdventure()
     .accountsPartial({
       owner,
@@ -660,7 +608,7 @@ export async function createExitAdventureInstruction(options: {
     .remainingAccounts(remainingAccounts)
     .instruction();
 
-  return instruction;
+  return ix;
 }
 
 // ---------- Loot & Inventory ----------

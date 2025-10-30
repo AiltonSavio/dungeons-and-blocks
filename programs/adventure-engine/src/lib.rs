@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use dungeon_nft::state::DungeonMint;
+use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 
 use crate::{
     constants::{ADVENTURE_SEED, COMBAT_SEED},
@@ -78,7 +79,7 @@ pub struct SetDelegate<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
-// Delegation context retained for future MagicBlock integration.
+#[delegate]
 #[derive(Accounts)]
 pub struct DelegateAdventure<'info> {
     #[account(mut)]
@@ -87,6 +88,7 @@ pub struct DelegateAdventure<'info> {
     /// CHECK: PDA to delegate (validated by seeds/bump)
     #[account(
         mut,
+        del,
         seeds = [ADVENTURE_SEED, owner.key().as_ref(), dungeon_mint.key().as_ref()],
         bump
     )]
@@ -114,6 +116,7 @@ pub struct MoveHero<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
+#[commit]
 #[derive(Accounts)]
 pub struct ExitAdventure<'info> {
     /// CHECK: The owner of the adventure session (used for PDA derivation)
@@ -267,6 +270,7 @@ pub struct DeclineEncounter<'info> {
     pub adventure: Account<'info, AdventureSession>,
 }
 
+#[ephemeral]
 #[program]
 pub mod adventure_engine {
     use super::*;
