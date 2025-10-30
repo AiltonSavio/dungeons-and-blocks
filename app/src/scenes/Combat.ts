@@ -743,6 +743,31 @@ export default class Combat extends Phaser.Scene {
   }
 
   private renderHero(hero: ChainHeroCombatant, index: number) {
+    if (hero.maxHp === 0) {
+      const sprite = this.heroSprites.get(index);
+      if (sprite) {
+        sprite.destroy();
+        this.heroSprites.delete(index);
+      }
+      const hpBar = this.heroHpBars.get(index);
+      if (hpBar) {
+        hpBar.getData("hpText")?.destroy();
+        hpBar.destroy();
+        this.heroHpBars.delete(index);
+      }
+      const apText = this.heroApTexts.get(index);
+      if (apText) {
+        apText.destroy();
+        this.heroApTexts.delete(index);
+      }
+      const statusContainer = this.statusContainers.get(index);
+      if (statusContainer) {
+        statusContainer.destroy();
+        this.statusContainers.delete(index);
+      }
+      return;
+    }
+
     const slot = this.heroSlots[index];
     if (!slot) return;
 
@@ -797,10 +822,10 @@ export default class Combat extends Phaser.Scene {
         hp.destroy();
         this.enemyHpBars.delete(index);
       }
-      const status = this.statusContainers.get(index);
+      const status = this.statusContainers.get(index + 100);
       if (status) {
         status.destroy();
-        this.statusContainers.delete(index);
+        this.statusContainers.delete(index + 100);
       }
       return;
     }
@@ -1060,12 +1085,12 @@ export default class Combat extends Phaser.Scene {
     slot: Phaser.Math.Vector2,
     isHero: boolean
   ) {
-    const key = isHero ? `hero_${index}` : `enemy_${index}`;
-    let container = this.statusContainers.get(index);
+    const mapKey = isHero ? index : index + 100;
+    let container = this.statusContainers.get(mapKey);
 
     if (!container) {
       container = this.add.container(slot.x - 40, slot.y - 70).setDepth(20);
-      this.statusContainers.set(index, container);
+      this.statusContainers.set(mapKey, container);
     }
 
     container.removeAll(true);

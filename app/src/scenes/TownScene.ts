@@ -2669,7 +2669,7 @@ export class TownScene extends Phaser.Scene {
             })
             .setOrigin(0, 0)
         );
-        offset += 28;
+        offset += 32;
 
         marketContainer.add(
           this.add

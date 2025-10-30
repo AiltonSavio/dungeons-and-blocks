@@ -2971,6 +2971,11 @@ export default class Game extends Phaser.Scene {
     // Hook your actual "use item" flow here
     console.log(`[Game] Use item requested: ${def.name}`);
 
+    if (id === "minor_torch") {
+      const newTorchPct = Math.min(100, this.torchPct + 25);
+      this.setTorchPct(newTorchPct);
+    }
+
     // For demo: just flash and decrement from HUD (no chain write)
     const slot = this.inventorySlots.find((s) => s.id === id && s.qty > 0);
     if (!slot) return;

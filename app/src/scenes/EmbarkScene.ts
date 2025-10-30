@@ -790,7 +790,6 @@ export class EmbarkScene extends Phaser.Scene {
       const card = this.buildDungeonCard(
         dungeon.metadata.name || `Dungeon #${dungeon.mintId}`,
         `Size ${dungeon.gridWidth}×${dungeon.gridHeight} • Seed ${dungeon.seed}`,
-        this.estimateDifficulty(dungeon),
         String(dungeon.seed),
         [
           {
@@ -878,7 +877,6 @@ export class EmbarkScene extends Phaser.Scene {
       const card = this.buildDungeonCard(
         dungeon.metadata.name || `Dungeon #${dungeon.mintId}`,
         `Size ${dungeon.gridWidth}×${dungeon.gridHeight}`,
-        this.estimateDifficulty(dungeon),
         String(dungeon.seed),
         [
           {
@@ -902,7 +900,6 @@ export class EmbarkScene extends Phaser.Scene {
   private buildDungeonCard(
     name: string,
     description: string,
-    difficulty: number,
     seed: string,
     actions: { label: string; handler: () => void; enabled: boolean }[],
     selected: boolean,
@@ -917,9 +914,7 @@ export class EmbarkScene extends Phaser.Scene {
 
     container.add(this.add.text(16, 12, name, UI_FONT.body).setOrigin(0, 0));
     container.add(
-      this.add
-        .text(16, 34, `Difficulty ${difficulty}  Seed ${seed}`, UI_FONT.caption)
-        .setOrigin(0, 0)
+      this.add.text(16, 34, `Seed ${seed}`, UI_FONT.caption).setOrigin(0, 0)
     );
     container.add(
       this.add
@@ -1690,13 +1685,6 @@ export class EmbarkScene extends Phaser.Scene {
       this.dungeonsLoading = false;
       if (ready) this.refresh();
     }
-  }
-
-  private estimateDifficulty(dungeon: ChainDungeon): number {
-    // Estimate difficulty based on dungeon size
-    const area = dungeon.gridWidth * dungeon.gridHeight;
-    const approximate = Math.ceil(area / 200); // Rough estimate: larger dungeons = harder
-    return clamp(approximate, 1, 5);
   }
 
   private shortenAddress(address: string) {
