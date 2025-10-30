@@ -31,6 +31,7 @@ import {
   fetchAdventureSessionSmart,
   createBeginEncounterInstruction,
   createDeclineEncounterInstruction,
+  createUseItemInstruction,
   type AdventureDirection,
   fetchAdventureSession,
 } from "../state/adventureChain";
@@ -41,6 +42,7 @@ import {
   InventoryItemParam,
   InventorySlotView,
   ITEM_DEFINITIONS,
+  ITEM_ID_TO_KEY,
   ITEM_KEY_TO_ID,
   ITEM_SLOT_EMPTY,
   SupplySlot,
@@ -2581,13 +2583,15 @@ export default class Game extends Phaser.Scene {
     for (let index = 0; index < maxHeroes; index++) {
       const snapshot = snapshots[index];
       const label = this.formatHeroHud(snapshot, index);
+
+      // slightly smaller text for better readability
       const text = this.add
         .text(startX, cursorY, label, {
           fontFamily: font,
           fontSize: `${fontSizePx}px`,
           color: "#e6e6e6",
           align: "left",
-          lineSpacing: 2,
+          lineSpacing: 3, // ↑ slightly larger line spacing for clarity
         })
         .setOrigin(0, 0)
         .setScrollFactor(0)
@@ -2596,11 +2600,25 @@ export default class Game extends Phaser.Scene {
       // subtle shadow for readability
       text.setShadow(1, 1, "#000000", 2, false, true);
 
-      tempTexts.push(text);
+      // add a faint separator line for each hero block
+      const sep = this.add
+        .rectangle(
+          startX,
+          cursorY + text.height + 4,
+          maxWidth + 40,
+          1,
+          0xffffff,
+          0.15
+        )
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(10_000);
+
       this.uiLayer.add(text);
+      this.uiLayer.add(sep);
 
       maxWidth = Math.max(maxWidth, text.width);
-      cursorY += text.height + lineGap;
+      cursorY += text.height + lineGap + 10; // ↑ extra gap between heroes
     }
 
     // Compute panel rect
@@ -2640,12 +2658,13 @@ export default class Game extends Phaser.Scene {
     const stressCap = snapshot.stressMax > 0 ? snapshot.stressMax : 200;
     const stressValue = Math.min(snapshot.stress, stressCap);
     const hpLine = `HP ${snapshot.currentHp}/${snapshot.maxHp} | Stress ${stressValue}/${stressCap}`;
-    const statsLine = `ATK ${snapshot.attack} DEF ${snapshot.defense} MAG ${snapshot.magic} RES ${snapshot.resistance} SPD ${snapshot.speed} LCK ${snapshot.luck}`;
+    const statsLine1 = `ATK ${snapshot.attack} DEF ${snapshot.defense} MAG ${snapshot.magic}`;
+    const statsLine2 = `RES ${snapshot.resistance} SPD ${snapshot.speed} LCK ${snapshot.luck}`;
     const statusLine = `Status: ${this.describeStatuses(
       snapshot.statusEffects
     )}`;
     const traitsLine = `Traits: ${this.describeTraits(snapshot)}`;
-    return `${name} (${cls}) Lv ${snapshot.level}\n${hpLine}\n${statsLine}\n${statusLine}\n${traitsLine}`;
+    return `${name} (${cls}) Lv ${snapshot.level}\n${hpLine}\n${statsLine1}\n${statsLine2}\n${statusLine}\n${traitsLine}`;
   }
 
   private describeStatuses(mask: number): string {
@@ -2964,26 +2983,70 @@ export default class Game extends Phaser.Scene {
     });
   }
 
-  private tryUseItem(id: keyof typeof ITEM_DEFINITIONS) {
+  private async tryUseItem(id: keyof typeof ITEM_DEFINITIONS) {
     const def = ITEM_DEFINITIONS[id];
     if (!def?.usable) return;
 
-    // Hook your actual "use item" flow here
     console.log(`[Game] Use item requested: ${def.name}`);
 
-    if (id === "minor_torch") {
-      const newTorchPct = Math.min(100, this.torchPct + 25);
-      this.setTorchPct(newTorchPct);
+    if (!this.adventurePda || !this.playerPublicKey || !this.tempKeypair) {
+      console.warn("[Game] Adventure context not ready for item use");
+      return;
     }
 
-    // For demo: just flash and decrement from HUD (no chain write)
-    const slot = this.inventorySlots.find((s) => s.id === id && s.qty > 0);
-    if (!slot) return;
-    const newQty = slot.qty - 1;
-    if (newQty > 0) {
-      this.updateSlotView(slot, id, newQty);
-    } else {
-      this.updateSlotViewEmpty(slot);
+    const connection = this.getSolanaConnection();
+    if (!connection) {
+      console.warn("[Game] Connection not available for item use");
+      return;
+    }
+
+    const itemKey = ITEM_ID_TO_KEY[id];
+    if (itemKey === undefined) {
+      console.error(`[Game] No item key found for ID: ${id}`);
+      return;
+    }
+
+    try {
+      const ix = await createUseItemInstruction({
+        connection,
+        owner: this.playerPublicKey,
+        authority: this.tempKeypair.publicKey,
+        adventurePda: this.adventurePda,
+        itemKey,
+        quantity: 1,
+      });
+
+      const { blockhash, lastValidBlockHeight } =
+        await connection.getLatestBlockhash("confirmed");
+      const tx = new Transaction();
+      tx.feePayer = this.tempKeypair.publicKey;
+      tx.recentBlockhash = blockhash;
+      tx.add(ix);
+      tx.sign(this.tempKeypair);
+
+      const signature = await connection.sendRawTransaction(tx.serialize(), {
+        skipPreflight: false,
+      });
+
+      await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        "confirmed"
+      );
+
+      const updated = await fetchAdventureSessionSmart(
+        connection,
+        null,
+        this.adventurePda
+      );
+
+      if (updated) {
+        this.adventureSession = updated;
+        if (Number.isFinite(updated.torch)) this.setTorchPct(updated.torch);
+        this.rebuildHeroHud();
+        this.syncInventoryFromAdventure();
+      }
+    } catch (err) {
+      console.error(`[Game] Failed to use item '${id}':`, err);
     }
   }
 

@@ -86,4 +86,6 @@ pub enum AdventureError {
     InvalidTarget,
     #[msg("combat resolution pending")]
     CombatNotResolved,
+    #[msg("item cannot be used")]
+    ItemNotUsable,
 }

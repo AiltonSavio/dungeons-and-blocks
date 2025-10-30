@@ -354,3 +354,54 @@ fn apply_inventory_add(
 
     Ok(())
 }
+
+pub fn use_item(ctx: Context<ManageItems>, item_key: u8, quantity: u16) -> Result<()> {
+    require!(item_key < 7, AdventureError::InvalidItemKey);
+    require!(quantity > 0, AdventureError::InvalidItemQuantity);
+
+    let adventure = &mut ctx.accounts.adventure;
+    let owner = ctx.accounts.owner.key();
+    let authority = ctx.accounts.authority.key();
+
+    enforce_authority(adventure, &owner, &authority)?;
+
+    require!(adventure.is_active, AdventureError::AdventureNotActive);
+    require!(adventure.heroes_inside, AdventureError::AdventureNotActive);
+
+    let item_enum = resolve_item_enum(item_key)?;
+    let definition = item_enum.definition();
+    require!(definition.usable, AdventureError::ItemNotUsable);
+
+    // Consume the item from inventory
+    let slot = adventure
+        .items
+        .iter_mut()
+        .find(|s| s.item_key == item_key && s.quantity > 0)
+        .ok_or(AdventureError::ItemNotFound)?;
+
+    require!(
+        slot.quantity >= quantity,
+        AdventureError::InsufficientItemQuantity
+    );
+
+    slot.quantity -= quantity;
+    if slot.quantity == 0 {
+        *slot = ItemSlot::empty();
+        adventure.item_count = adventure.item_count.saturating_sub(1);
+    }
+
+    // Apply item effect
+    match item_enum {
+        ItemKey::MinorTorch => {
+            adventure.torch = adventure.torch.saturating_add(25);
+            if adventure.torch > 100 {
+                adventure.torch = 100;
+            }
+        }
+        _ => {
+            // For now, other items do nothing on-chain when "used"
+        }
+    }
+
+    Ok(())
+}

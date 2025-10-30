@@ -104,6 +104,7 @@ pub struct ItemDefinition {
     pub buy_price: Option<u64>,
     pub sell_price: Option<u64>,
     pub max_stack: u16,
+    pub usable: bool,
 }
 
 const ITEM_DEFINITIONS: [ItemDefinition; ITEM_COUNT] = [
@@ -112,41 +113,48 @@ const ITEM_DEFINITIONS: [ItemDefinition; ITEM_COUNT] = [
         buy_price: None,
         sell_price: Some(25),
         max_stack: 0,
+        usable: false,
     },
     ItemDefinition {
         key: ItemKey::StressTonic,
         buy_price: Some(42),
         sell_price: Some(21),
         max_stack: 0,
+        usable: true,
     },
     ItemDefinition {
         key: ItemKey::MinorTorch,
         buy_price: Some(28),
         sell_price: Some(14),
         max_stack: 0,
+        usable: true,
     },
     ItemDefinition {
         key: ItemKey::HealingSalve,
         buy_price: Some(65),
         sell_price: Some(32),
         max_stack: 0,
+        usable: true,
     },
     ItemDefinition {
         key: ItemKey::MysteryRelic,
         buy_price: None,
         sell_price: Some(140),
         max_stack: 0,
+        usable: false,
     },
     ItemDefinition {
         key: ItemKey::CalmingIncense,
         buy_price: None,
         sell_price: Some(90),
         max_stack: 3,
+        usable: true,
     },
     ItemDefinition {
         key: ItemKey::PhoenixFeather,
         buy_price: None,
         sell_price: Some(220),
         max_stack: 1,
+        usable: false,
     },
 ];

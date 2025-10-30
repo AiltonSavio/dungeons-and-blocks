@@ -345,4 +345,8 @@ pub mod adventure_engine {
     pub fn decline_encounter(ctx: Context<DeclineEncounter>) -> Result<()> {
         crate::instructions::combat::decline_encounter(ctx)
     }
+
+    pub fn use_item(ctx: Context<ManageItems>, item_key: u8, quantity: u16) -> Result<()> {
+        crate::instructions::items::use_item(ctx, item_key, quantity)
+    }
 }

@@ -769,6 +769,30 @@ export async function createSwapItemInstruction(options: {
   return instruction;
 }
 
+export async function createUseItemInstruction(options: {
+  connection: Connection;
+  owner: PublicKey;
+  authority: PublicKey;
+  adventurePda: PublicKey;
+  itemKey: number;
+  quantity: number;
+}): Promise<TransactionInstruction> {
+  const { connection, owner, authority, adventurePda, itemKey, quantity } =
+    options;
+  const program = getAdventureProgram(connection, owner);
+
+  const instruction = await program.methods
+    .useItem(itemKey, quantity)
+    .accountsPartial({
+      owner,
+      authority,
+      adventure: adventurePda,
+    })
+    .instruction();
+
+  return instruction;
+}
+
 export type HeroLockStatus = {
   heroMint: string;
   isActive: boolean;
