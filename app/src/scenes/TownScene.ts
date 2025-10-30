@@ -1190,18 +1190,24 @@ export class TownScene extends Phaser.Scene {
     this.updateGrantButton();
 
     try {
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
       // Ensure economy account is initialized
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        this.showToast("Failed to initialize economy account.");
-        return;
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const owner = new PublicKey(this.walletAddress);
-      const instruction = createGrantHourlyGoldInstruction(owner);
+      const grantIx = createGrantHourlyGoldInstruction(owner);
+      instructions.push(grantIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(`Vault credited with ${HOURLY_GRANT_AMOUNT} gold.`);
+
+      // Add a small delay to allow for blockchain propagation
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Sync from chain to update local state
       await this.syncEconomyFromChain();
@@ -1228,30 +1234,25 @@ export class TownScene extends Phaser.Scene {
     }
   }
 
-  private async ensureEconomyInitialized(): Promise<boolean> {
-    if (!this.walletAddress) return false;
+  private async ensureEconomyInitialized(): Promise<TransactionInstruction | null> {
+    if (!this.walletAddress) return null;
 
     const connection = this.getSolanaConnection();
-    if (!connection) return false;
+    if (!connection) return null;
 
     try {
       const owner = new PublicKey(this.walletAddress);
       const economy = await fetchPlayerEconomy(connection, owner);
 
       if (economy) {
-        return true; // Already initialized
+        return null; // Already initialized
       }
 
       // Need to initialize
-      this.showToast("Initializing your economy account...");
-      const instruction = createInitializeEconomyInstruction(owner);
-      await this.sendProgramTransaction([instruction]);
-      this.showToast("Economy account initialized!");
-      return true;
+      return createInitializeEconomyInstruction(owner);
     } catch (err) {
-      console.error("Failed to ensure economy initialized:", err);
-      this.showToast("Failed to initialize economy account.");
-      return false;
+      console.error("Failed to check economy initialization status:", err);
+      return null;
     }
   }
 
@@ -1309,17 +1310,24 @@ export class TownScene extends Phaser.Scene {
     this.programBusy = true;
 
     try {
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
       // Ensure economy account is initialized
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        this.showToast("Failed to initialize economy account.");
-        return;
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const owner = new PublicKey(this.walletAddress);
-      const instruction = createBuyItemInstruction(owner, itemId, 1);
-      await this.sendProgramTransaction([instruction]);
+      const buyIx = createBuyItemInstruction(owner, itemId, 1);
+      instructions.push(buyIx);
+
+      await this.sendProgramTransaction(instructions);
       this.showToast(`Purchased 1x ${itemId.replace("_", " ")}.`);
+
+      // Add a small delay to allow for blockchain propagation
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Sync from chain to update local state
       await this.syncEconomyFromChain();
@@ -1349,17 +1357,24 @@ export class TownScene extends Phaser.Scene {
     this.programBusy = true;
 
     try {
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
       // Ensure economy account is initialized
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        this.showToast("Failed to initialize economy account.");
-        return;
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const owner = new PublicKey(this.walletAddress);
-      const instruction = createSellItemInstruction(owner, itemId, 1);
-      await this.sendProgramTransaction([instruction]);
+      const sellIx = createSellItemInstruction(owner, itemId, 1);
+      instructions.push(sellIx);
+
+      await this.sendProgramTransaction(instructions);
       this.showToast(`Sold 1x ${itemId.replace("_", " ")}.`);
+
+      // Add a small delay to allow for blockchain propagation
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Sync from chain to update local state
       await this.syncEconomyFromChain();
@@ -1398,30 +1413,27 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    const owner = new PublicKey(this.walletAddress);
-
     this.programBusy = true;
     try {
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        return;
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const instruction = createRerollStatsInstruction({
+      const rerollIx = createRerollStatsInstruction({
         owner,
         heroId: hero.id,
       });
+      instructions.push(rerollIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(
         `Blacksmith reroll queued for Hero #${hero.id} (cost ${HERO_BLACKSMITH_COST}g).`
       );
-      await this.syncEconomyFromChain();
-      await this.loadHeroes(this.walletAddress);
-      if (this.modalPanel) {
-        this.closeModal();
-        this.openBlacksmith();
-      }
     } catch (err) {
       this.handleProgramError(err, "Failed to reroll hero stats.");
     } finally {
@@ -1457,31 +1469,28 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    const owner = new PublicKey(this.walletAddress);
-
     this.programBusy = true;
     try {
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        return;
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const instruction = createHealHeroInstruction({
+      const healIx = createHealHeroInstruction({
         owner,
         heroId: hero.id,
         amount,
       });
+      instructions.push(healIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(
         `Healed ${amount} HP on Hero #${hero.id} for ${cost} gold.`
       );
-      await this.syncEconomyFromChain();
-      await this.loadHeroes(this.walletAddress);
-      if (this.modalPanel) {
-        this.closeModal();
-        this.openTavern();
-      }
     } catch (err) {
       this.handleProgramError(err, "Failed to heal hero.");
     } finally {
@@ -1521,24 +1530,28 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    const owner = new PublicKey(this.walletAddress);
-
     this.programBusy = true;
     try {
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        return;
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const instruction = createRelieveStressInstruction({
+      const relieveStressIx = createRelieveStressInstruction({
         owner,
         heroId: hero.id,
       });
+      instructions.push(relieveStressIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(
         `Abbey service complete for Hero #${hero.id} (cost ${HERO_ABBEY_COST}g).`
       );
+
       await this.syncEconomyFromChain();
       await this.loadHeroes(this.walletAddress);
       if (this.modalPanel) {
@@ -1575,30 +1588,27 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    const owner = new PublicKey(this.walletAddress);
-
     this.programBusy = true;
     try {
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        return;
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const instruction = createApplyBlessingInstruction({
+      const blessIx = createApplyBlessingInstruction({
         owner,
         heroId: hero.id,
       });
+      instructions.push(blessIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(
         `Blessing bestowed on Hero #${hero.id} (cost ${HERO_ABBEY_COST}g).`
       );
-      await this.syncEconomyFromChain();
-      await this.loadHeroes(this.walletAddress);
-      if (this.modalPanel) {
-        this.closeModal();
-        this.openAbbey();
-      }
     } catch (err) {
       this.handleProgramError(err, "Failed to bless hero.");
     } finally {
@@ -1625,22 +1635,25 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    const owner = new PublicKey(this.walletAddress);
-
     this.programBusy = true;
     try {
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        return;
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const instruction = createCureStatusEffectInstruction({
+      const cureIx = createCureStatusEffectInstruction({
         owner,
         heroId: hero.id,
         effectType,
       });
+      instructions.push(cureIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(
         `Status effect cured on Hero #${hero.id} (cost ${HERO_SANITARIUM_STATUS_CURE_COST}g).`
       );
@@ -1676,25 +1689,29 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    const owner = new PublicKey(this.walletAddress);
-
     this.programBusy = true;
     try {
-      const initialized = await this.ensureEconomyInitialized();
-      if (!initialized) {
-        return;
+      const owner = new PublicKey(this.walletAddress);
+      const instructions: TransactionInstruction[] = [];
+
+      const initEconomyIx = await this.ensureEconomyInitialized();
+      if (initEconomyIx) {
+        instructions.push(initEconomyIx);
+        this.showToast("Initializing your economy account...");
       }
 
-      const instruction = createCureNegativeTraitInstruction({
+      const cureTraitIx = createCureNegativeTraitInstruction({
         owner,
         heroId: hero.id,
         traitIndex,
       });
+      instructions.push(cureTraitIx);
 
-      await this.sendProgramTransaction([instruction]);
+      await this.sendProgramTransaction(instructions);
       this.showToast(
         `Negative trait cured on Hero #${hero.id} (cost ${HERO_SANITARIUM_TRAIT_CURE_COST}g).`
       );
+
       await this.syncEconomyFromChain();
       await this.loadHeroes(this.walletAddress);
       if (this.modalPanel) {

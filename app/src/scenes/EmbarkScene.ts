@@ -23,6 +23,7 @@ import {
   createSetDelegateInstruction,
   type HeroLockStatus,
 } from "../state/adventureChain";
+import { fetchPlayerEconomy, createInitializeEconomyInstruction } from "../state/economyChain";
 import {
   SAFE_MARGIN,
   UI_FONT,
@@ -1492,9 +1493,21 @@ export class EmbarkScene extends Phaser.Scene {
         units: 800_000,
       });
 
+      const instructions: TransactionInstruction[] = [computeIx];
+
+      // Check if player economy account exists, if not, add initialization instruction
+      const playerEconomyAccount = await fetchPlayerEconomy(connection, playerKey);
+      if (!playerEconomyAccount) {
+        console.log("[EmbarkScene] Player economy account not found, adding initialization instruction.");
+        const initializeEconomyIx = createInitializeEconomyInstruction(playerKey);
+        instructions.push(initializeEconomyIx);
+      }
+
+      instructions.push(startIx, setDelegateIx);
+
       // Transaction: Create adventure on main chain and set delegate
       console.log("[EmbarkScene] Creating adventure on main chain...");
-      await this.sendProgramTransaction([computeIx, startIx, setDelegateIx]);
+      await this.sendProgramTransaction(instructions);
 
       // Fetch the created adventure from base layer
       console.log("[EmbarkScene] Fetching adventure account...");
