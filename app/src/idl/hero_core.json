@@ -1,0 +1,3002 @@
+{
+  "address": "B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E",
+  "metadata": {
+    "name": "hero_core",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "apply_blessing",
+      "discriminator": [
+        182,
+        182,
+        226,
+        188,
+        88,
+        142,
+        63,
+        143
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "apply_status_effect",
+      "discriminator": [
+        115,
+        194,
+        95,
+        142,
+        223,
+        57,
+        136,
+        211
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "effect_type",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "burn_hero",
+      "discriminator": [
+        51,
+        232,
+        158,
+        137,
+        182,
+        112,
+        64,
+        42
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "callback_level_up_hero",
+      "discriminator": [
+        75,
+        31,
+        142,
+        23,
+        220,
+        72,
+        73,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "program_identity",
+          "signer": true,
+          "address": "9irBy75QS2BN81FUgXuHcjqceJJRuc9oDkAe8TKVvvAw"
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "callback_mint_hero_free",
+      "discriminator": [
+        224,
+        186,
+        8,
+        18,
+        235,
+        3,
+        140,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "program_identity",
+          "signer": true,
+          "address": "9irBy75QS2BN81FUgXuHcjqceJJRuc9oDkAe8TKVvvAw"
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player_profile.owner",
+                "account": "PlayerProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "callback_mint_hero_paid",
+      "discriminator": [
+        81,
+        72,
+        116,
+        74,
+        168,
+        104,
+        0,
+        232
+      ],
+      "accounts": [
+        {
+          "name": "program_identity",
+          "signer": true,
+          "address": "9irBy75QS2BN81FUgXuHcjqceJJRuc9oDkAe8TKVvvAw"
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player_profile.owner",
+                "account": "PlayerProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "callback_reroll_stats",
+      "discriminator": [
+        24,
+        134,
+        156,
+        127,
+        235,
+        95,
+        145,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "program_identity",
+          "signer": true,
+          "address": "9irBy75QS2BN81FUgXuHcjqceJJRuc9oDkAe8TKVvvAw"
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cure_negative_trait",
+      "discriminator": [
+        184,
+        47,
+        240,
+        204,
+        185,
+        36,
+        125,
+        247
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "trait_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "cure_status_effect",
+      "discriminator": [
+        148,
+        109,
+        211,
+        115,
+        188,
+        242,
+        207,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "effect_type",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "damage_hero",
+      "discriminator": [
+        148,
+        226,
+        43,
+        187,
+        219,
+        94,
+        134,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "grant_experience",
+      "discriminator": [
+        207,
+        8,
+        29,
+        155,
+        166,
+        199,
+        151,
+        39
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "grant_negative_trait",
+      "discriminator": [
+        224,
+        167,
+        223,
+        109,
+        73,
+        103,
+        118,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "trait_id",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "grant_status_effect",
+      "discriminator": [
+        109,
+        234,
+        227,
+        249,
+        202,
+        103,
+        148,
+        249
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "effect_type",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "heal_hero",
+      "discriminator": [
+        231,
+        106,
+        166,
+        17,
+        26,
+        207,
+        125,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_player",
+      "discriminator": [
+        79,
+        249,
+        88,
+        177,
+        220,
+        62,
+        56,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "level_up_hero",
+      "discriminator": [
+        190,
+        123,
+        111,
+        190,
+        184,
+        74,
+        34,
+        137
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "lock_for_adventure",
+      "discriminator": [
+        155,
+        54,
+        152,
+        75,
+        15,
+        169,
+        114,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "adventure_signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "adventure_pda",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "mint_hero_free",
+      "discriminator": [
+        26,
+        28,
+        214,
+        62,
+        10,
+        87,
+        144,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "player_profile.next_hero_id",
+                "account": "PlayerProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "mint_hero_paid",
+      "discriminator": [
+        157,
+        18,
+        206,
+        107,
+        36,
+        236,
+        5,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "account",
+                "path": "player_profile.next_hero_id",
+                "account": "PlayerProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "game_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  101,
+                  99,
+                  111,
+                  110,
+                  111,
+                  109,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                112,
+                43,
+                28,
+                176,
+                121,
+                72,
+                141,
+                186,
+                57,
+                239,
+                160,
+                40,
+                144,
+                249,
+                121,
+                197,
+                66,
+                214,
+                20,
+                170,
+                22,
+                176,
+                219,
+                21,
+                252,
+                153,
+                153,
+                123,
+                191,
+                230,
+                24,
+                124
+              ]
+            }
+          }
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "mint_hero_with_seed",
+      "discriminator": [
+        100,
+        33,
+        98,
+        128,
+        197,
+        193,
+        167,
+        135
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "address": "AXwYStYVryJuZjNJjHHLPp6eVRc2TuESnW1pCMiUYrwV"
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "player_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "player_profile.next_hero_id",
+                "account": "PlayerProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "owner",
+          "type": "pubkey"
+        },
+        {
+          "name": "seed",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "is_soulbound",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "relieve_stress",
+      "discriminator": [
+        41,
+        155,
+        34,
+        175,
+        206,
+        193,
+        142,
+        126
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "remove_status_effect",
+      "discriminator": [
+        65,
+        224,
+        113,
+        42,
+        21,
+        229,
+        211,
+        192
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        },
+        {
+          "name": "effect_type",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "reroll_stats",
+      "discriminator": [
+        96,
+        34,
+        45,
+        51,
+        61,
+        111,
+        65,
+        198
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "payer"
+              },
+              {
+                "kind": "arg",
+                "path": "hero_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "sync_stats_from_adventure",
+      "discriminator": [
+        191,
+        3,
+        47,
+        251,
+        16,
+        94,
+        217,
+        110
+      ],
+      "accounts": [
+        {
+          "name": "adventure_signer",
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_state",
+          "type": {
+            "defined": {
+              "name": "AdventureHeroStats"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "unlock_from_adventure",
+      "discriminator": [
+        241,
+        72,
+        139,
+        70,
+        121,
+        75,
+        25,
+        201
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "signer": true
+        },
+        {
+          "name": "hero_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  101,
+                  114,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.owner",
+                "account": "HeroMint"
+              },
+              {
+                "kind": "account",
+                "path": "hero_mint.id",
+                "account": "HeroMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "adventure_signer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "adventure_pda",
+          "type": "pubkey"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "GameVault",
+      "discriminator": [
+        152,
+        194,
+        238,
+        3,
+        140,
+        24,
+        51,
+        32
+      ]
+    },
+    {
+      "name": "HeroMint",
+      "discriminator": [
+        202,
+        83,
+        95,
+        67,
+        120,
+        234,
+        56,
+        187
+      ]
+    },
+    {
+      "name": "PlayerEconomy",
+      "discriminator": [
+        13,
+        211,
+        131,
+        77,
+        0,
+        34,
+        150,
+        149
+      ]
+    },
+    {
+      "name": "PlayerProfile",
+      "discriminator": [
+        82,
+        226,
+        99,
+        87,
+        164,
+        130,
+        181,
+        80
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ExperienceGranted",
+      "discriminator": [
+        50,
+        90,
+        99,
+        216,
+        51,
+        74,
+        75,
+        202
+      ]
+    },
+    {
+      "name": "HeroBlessed",
+      "discriminator": [
+        69,
+        109,
+        3,
+        189,
+        223,
+        151,
+        21,
+        52
+      ]
+    },
+    {
+      "name": "HeroBurned",
+      "discriminator": [
+        216,
+        98,
+        168,
+        248,
+        68,
+        177,
+        172,
+        184
+      ]
+    },
+    {
+      "name": "HeroDamaged",
+      "discriminator": [
+        21,
+        188,
+        188,
+        141,
+        18,
+        30,
+        3,
+        103
+      ]
+    },
+    {
+      "name": "HeroHealed",
+      "discriminator": [
+        158,
+        57,
+        41,
+        82,
+        149,
+        105,
+        112,
+        215
+      ]
+    },
+    {
+      "name": "HeroLeveledUp",
+      "discriminator": [
+        228,
+        107,
+        148,
+        124,
+        139,
+        29,
+        247,
+        148
+      ]
+    },
+    {
+      "name": "HeroLockedEvent",
+      "discriminator": [
+        30,
+        3,
+        168,
+        160,
+        215,
+        46,
+        150,
+        145
+      ]
+    },
+    {
+      "name": "HeroMinted",
+      "discriminator": [
+        157,
+        207,
+        42,
+        108,
+        87,
+        16,
+        73,
+        63
+      ]
+    },
+    {
+      "name": "HeroUnlockedEvent",
+      "discriminator": [
+        131,
+        224,
+        143,
+        46,
+        201,
+        23,
+        13,
+        66
+      ]
+    },
+    {
+      "name": "NegativeTraitGranted",
+      "discriminator": [
+        23,
+        38,
+        190,
+        146,
+        6,
+        194,
+        182,
+        254
+      ]
+    },
+    {
+      "name": "PlayerInitialized",
+      "discriminator": [
+        214,
+        37,
+        153,
+        142,
+        63,
+        109,
+        206,
+        15
+      ]
+    },
+    {
+      "name": "RandomnessRequested",
+      "discriminator": [
+        10,
+        64,
+        183,
+        29,
+        104,
+        63,
+        90,
+        149
+      ]
+    },
+    {
+      "name": "StatsRerolled",
+      "discriminator": [
+        121,
+        195,
+        212,
+        11,
+        68,
+        52,
+        197,
+        78
+      ]
+    },
+    {
+      "name": "StatusEffectApplied",
+      "discriminator": [
+        69,
+        239,
+        2,
+        66,
+        141,
+        216,
+        12,
+        234
+      ]
+    },
+    {
+      "name": "StatusEffectGranted",
+      "discriminator": [
+        125,
+        131,
+        47,
+        39,
+        54,
+        146,
+        94,
+        184
+      ]
+    },
+    {
+      "name": "StatusEffectRemoved",
+      "discriminator": [
+        211,
+        14,
+        26,
+        123,
+        137,
+        157,
+        158,
+        239
+      ]
+    },
+    {
+      "name": "StressRelieved",
+      "discriminator": [
+        101,
+        190,
+        183,
+        148,
+        6,
+        6,
+        241,
+        37
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "MissingBump",
+      "msg": "Missing PDA bump value"
+    },
+    {
+      "code": 6001,
+      "name": "FreeMintsExhausted",
+      "msg": "Player already used all free hero mints"
+    },
+    {
+      "code": 6002,
+      "name": "HeroCapacityReached",
+      "msg": "Player reached maximum hero capacity"
+    },
+    {
+      "code": 6003,
+      "name": "InsufficientGold",
+      "msg": "Insufficient gold for paid mint"
+    },
+    {
+      "code": 6004,
+      "name": "MathOverflow",
+      "msg": "Math overflow detected"
+    },
+    {
+      "code": 6005,
+      "name": "UnexpectedCallback",
+      "msg": "Unexpected randomness callback"
+    },
+    {
+      "code": 6006,
+      "name": "HeroBurned",
+      "msg": "Hero already burned"
+    },
+    {
+      "code": 6007,
+      "name": "UnauthorizedOwner",
+      "msg": "Unauthorized hero owner"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidVrfIdentity",
+      "msg": "Invalid VRF identity signer"
+    },
+    {
+      "code": 6009,
+      "name": "HeroMismatch",
+      "msg": "Hero account mismatch"
+    },
+    {
+      "code": 6010,
+      "name": "HeroBusy",
+      "msg": "Hero already processing a randomness request"
+    },
+    {
+      "code": 6011,
+      "name": "MaxLevelReached",
+      "msg": "Hero reached maximum level"
+    },
+    {
+      "code": 6012,
+      "name": "InsufficientExperience",
+      "msg": "Hero does not meet experience requirement for level up"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidLevelProgression",
+      "msg": "Invalid level progression requested"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidStatusEffect",
+      "msg": "Invalid status effect type"
+    },
+    {
+      "code": 6015,
+      "name": "HeroLocked",
+      "msg": "Hero is locked in an adventure"
+    },
+    {
+      "code": 6016,
+      "name": "WrongAdventure",
+      "msg": "Adventure signer mismatch"
+    },
+    {
+      "code": 6017,
+      "name": "WrongProgram",
+      "msg": "Adventure program mismatch"
+    },
+    {
+      "code": 6018,
+      "name": "NotLocked",
+      "msg": "Hero is not locked"
+    },
+    {
+      "code": 6019,
+      "name": "AlreadyLocked",
+      "msg": "Hero already locked"
+    },
+    {
+      "code": 6020,
+      "name": "UnauthorizedAuthority",
+      "msg": "Seeded mint authority mismatch"
+    },
+    {
+      "code": 6021,
+      "name": "NoStatusEffects",
+      "msg": "No status effects to cure"
+    },
+    {
+      "code": 6022,
+      "name": "NoNegativeTraits",
+      "msg": "No negative traits to cure"
+    },
+    {
+      "code": 6023,
+      "name": "MaxRerollsReached",
+      "msg": "Hero has reached maximum reroll limit"
+    },
+    {
+      "code": 6024,
+      "name": "NoStressToRelieve",
+      "msg": "Hero stress is already at zero"
+    },
+    {
+      "code": 6025,
+      "name": "AlreadyBlessed",
+      "msg": "Hero is already blessed"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidNegativeTrait",
+      "msg": "Invalid negative trait"
+    },
+    {
+      "code": 6027,
+      "name": "NegativeTraitSlotsFull",
+      "msg": "All negative trait slots are filled"
+    },
+    {
+      "code": 6028,
+      "name": "HeroAtMaxHp",
+      "msg": "Hero is already at maximum HP"
+    },
+    {
+      "code": 6029,
+      "name": "InvalidHealAmount",
+      "msg": "Invalid heal amount"
+    },
+    {
+      "code": 6030,
+      "name": "HealAmountTooLarge",
+      "msg": "Heal amount exceeds missing HP"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdventureHeroStats",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "hero_type",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "experience",
+            "type": "u64"
+          },
+          {
+            "name": "max_hp",
+            "type": "u8"
+          },
+          {
+            "name": "current_hp",
+            "type": "u8"
+          },
+          {
+            "name": "attack",
+            "type": "u8"
+          },
+          {
+            "name": "defense",
+            "type": "u8"
+          },
+          {
+            "name": "magic",
+            "type": "u8"
+          },
+          {
+            "name": "resistance",
+            "type": "u8"
+          },
+          {
+            "name": "speed",
+            "type": "u8"
+          },
+          {
+            "name": "luck",
+            "type": "u8"
+          },
+          {
+            "name": "status_effects",
+            "type": "u8"
+          },
+          {
+            "name": "stress",
+            "type": "u16"
+          },
+          {
+            "name": "stress_max",
+            "type": "u16"
+          },
+          {
+            "name": "positive_traits",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "name": "negative_traits",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExperienceGranted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "total_experience",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GameVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "balance",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                7
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroBlessed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroBurned",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroDamaged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u8"
+          },
+          {
+            "name": "remaining_hp",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroHealed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u8"
+          },
+          {
+            "name": "gold_spent",
+            "type": "u64"
+          },
+          {
+            "name": "resulting_hp",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroLeveledUp",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "new_level",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroLockedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "adventure",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroMint",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "hero_type",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "experience",
+            "type": "u64"
+          },
+          {
+            "name": "max_hp",
+            "type": "u8"
+          },
+          {
+            "name": "current_hp",
+            "type": "u8"
+          },
+          {
+            "name": "attack",
+            "type": "u8"
+          },
+          {
+            "name": "defense",
+            "type": "u8"
+          },
+          {
+            "name": "magic",
+            "type": "u8"
+          },
+          {
+            "name": "resistance",
+            "type": "u8"
+          },
+          {
+            "name": "speed",
+            "type": "u8"
+          },
+          {
+            "name": "luck",
+            "type": "u8"
+          },
+          {
+            "name": "status_effects",
+            "type": "u8"
+          },
+          {
+            "name": "skill_1",
+            "type": {
+              "defined": {
+                "name": "Skill"
+              }
+            }
+          },
+          {
+            "name": "skill_2",
+            "type": {
+              "defined": {
+                "name": "Skill"
+              }
+            }
+          },
+          {
+            "name": "positive_traits",
+            "type": {
+              "array": [
+                {
+                  "option": "u8"
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "negative_traits",
+            "type": {
+              "array": [
+                {
+                  "option": "u8"
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "is_soulbound",
+            "type": "bool"
+          },
+          {
+            "name": "is_burned",
+            "type": "bool"
+          },
+          {
+            "name": "mint_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "last_level_up",
+            "type": "i64"
+          },
+          {
+            "name": "pending_request",
+            "type": "u8"
+          },
+          {
+            "name": "locked",
+            "type": "bool"
+          },
+          {
+            "name": "locked_adventure",
+            "type": "pubkey"
+          },
+          {
+            "name": "locked_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "locked_since",
+            "type": "i64"
+          },
+          {
+            "name": "stress",
+            "type": "u16"
+          },
+          {
+            "name": "stress_max",
+            "type": "u16"
+          },
+          {
+            "name": "reroll_count",
+            "type": "u8"
+          },
+          {
+            "name": "blessed",
+            "type": "bool"
+          },
+          {
+            "name": "padding",
+            "type": {
+              "array": [
+                "u8",
+                25
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroMinted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "hero_type",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "is_soulbound",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroUnlockedEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "adventure",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NegativeTraitGranted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "trait_id",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerEconomy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "gold",
+            "type": "u64"
+          },
+          {
+            "name": "last_grant_ts",
+            "type": "i64"
+          },
+          {
+            "name": "items",
+            "type": {
+              "array": [
+                "u16",
+                7
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerProfile",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "hero_count",
+            "type": "u8"
+          },
+          {
+            "name": "free_mints_claimed",
+            "type": "bool"
+          },
+          {
+            "name": "free_mint_count",
+            "type": "u8"
+          },
+          {
+            "name": "next_hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "soulbound_hero_ids",
+            "type": {
+              "array": [
+                {
+                  "option": "u64"
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RandomnessRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "request_type",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Skill",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "id",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatsRerolled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "reroll_count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatusEffectApplied",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "effect_type",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatusEffectGranted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "effect_type",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatusEffectRemoved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "effect_type",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StressRelieved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "hero_id",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

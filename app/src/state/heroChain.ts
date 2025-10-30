@@ -7,7 +7,7 @@ import {
 } from "@solana/web3.js";
 import { BorshInstructionCoder, BN } from "@coral-xyz/anchor";
 import { Buffer } from "buffer";
-import heroIdl from "../../../target/idl/hero_core.json";
+import heroIdl from "../idl/hero_core.json";
 import {
   PLAYER_ECONOMY_PROGRAM_ID,
   derivePlayerEconomyPda,

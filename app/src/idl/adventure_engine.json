@@ -1,0 +1,2521 @@
+{
+  "address": "Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC",
+  "metadata": {
+    "name": "adventure_engine",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "begin_encounter",
+      "discriminator": [
+        245,
+        99,
+        22,
+        79,
+        131,
+        0,
+        159,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "combat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  98,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "adventure"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "conclude_combat",
+      "discriminator": [
+        169,
+        140,
+        255,
+        187,
+        71,
+        27,
+        39,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "combat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  98,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "adventure"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "decline_encounter",
+      "discriminator": [
+        76,
+        245,
+        241,
+        123,
+        40,
+        215,
+        109,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "delegate_adventure",
+      "docs": [
+        "Delegation currently disabled while developing on main chain."
+      ],
+      "discriminator": [
+        180,
+        146,
+        240,
+        11,
+        96,
+        219,
+        78,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "buffer_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                249,
+                114,
+                134,
+                167,
+                208,
+                86,
+                63,
+                183,
+                188,
+                99,
+                152,
+                144,
+                10,
+                231,
+                8,
+                168,
+                36,
+                208,
+                87,
+                211,
+                119,
+                34,
+                180,
+                183,
+                202,
+                194,
+                236,
+                47,
+                56,
+                78,
+                77,
+                71
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pda"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "pda",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "dungeon_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "dungeon_mint"
+        },
+        {
+          "name": "owner_program",
+          "address": "Hnjoe3f7cZuc47RMytSyBrdpxj6x8SoHQBRfqdwKvxVC"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "drop_item",
+      "discriminator": [
+        115,
+        155,
+        141,
+        193,
+        88,
+        244,
+        150,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "item_key",
+          "type": "u8"
+        },
+        {
+          "name": "quantity",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "exit_adventure",
+      "discriminator": [
+        22,
+        116,
+        253,
+        209,
+        213,
+        254,
+        243,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hero_program",
+          "address": "B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E"
+        },
+        {
+          "name": "dungeon"
+        },
+        {
+          "name": "player_economy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  101,
+                  99,
+                  111,
+                  110,
+                  111,
+                  109,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "player_economy_program"
+            }
+          }
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "move_hero",
+      "discriminator": [
+        244,
+        56,
+        184,
+        167,
+        104,
+        7,
+        192,
+        200
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "direction",
+          "type": {
+            "defined": {
+              "name": "Direction"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "open_chest",
+      "discriminator": [
+        143,
+        8,
+        253,
+        123,
+        197,
+        30,
+        173,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "chest_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "pickup_item",
+      "discriminator": [
+        227,
+        155,
+        134,
+        52,
+        209,
+        36,
+        82,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "item_key",
+          "type": "u8"
+        },
+        {
+          "name": "quantity",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_delegate",
+      "docs": [
+        "Only writes the delegate key into the account data."
+      ],
+      "discriminator": [
+        242,
+        30,
+        46,
+        76,
+        108,
+        235,
+        128,
+        181
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "adventure.player",
+                "account": "AdventureSession"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "delegate",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "start_adventure",
+      "discriminator": [
+        244,
+        69,
+        67,
+        24,
+        20,
+        17,
+        219,
+        189
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "dungeon"
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "account",
+                "path": "dungeon"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_economy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  121,
+                  101,
+                  114,
+                  95,
+                  101,
+                  99,
+                  111,
+                  110,
+                  111,
+                  109,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "player_economy_program"
+            }
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "hero_program",
+          "address": "B8KfNvRUoNbF7FPeuDdZ7nfjPXz6kAex4Pye6GcpLD1E"
+        },
+        {
+          "name": "player_economy_program",
+          "address": "8YrnrrGJpPaghXZUQ7Pwz2ST972HqRcxVsAbThPpA5bZ"
+        }
+      ],
+      "args": [
+        {
+          "name": "hero_mints",
+          "type": {
+            "vec": "pubkey"
+          }
+        },
+        {
+          "name": "items",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "ItemInput"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_combat_action",
+      "discriminator": [
+        12,
+        110,
+        71,
+        69,
+        111,
+        83,
+        24,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        },
+        {
+          "name": "combat",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  98,
+                  97,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "adventure"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "instruction",
+          "type": {
+            "defined": {
+              "name": "CombatInstruction"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "swap_item",
+      "discriminator": [
+        211,
+        203,
+        91,
+        231,
+        154,
+        167,
+        32,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "drop_item_key",
+          "type": "u8"
+        },
+        {
+          "name": "drop_quantity",
+          "type": "u16"
+        },
+        {
+          "name": "pickup_item_key",
+          "type": "u8"
+        },
+        {
+          "name": "pickup_quantity",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "use_item",
+      "discriminator": [
+        38,
+        85,
+        191,
+        23,
+        255,
+        151,
+        204,
+        199
+      ],
+      "accounts": [
+        {
+          "name": "owner"
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "adventure",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  118,
+                  101,
+                  110,
+                  116,
+                  117,
+                  114,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "adventure.dungeon_mint",
+                "account": "AdventureSession"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "item_key",
+          "type": "u8"
+        },
+        {
+          "name": "quantity",
+          "type": "u16"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AdventureCombat",
+      "discriminator": [
+        240,
+        15,
+        101,
+        166,
+        194,
+        178,
+        153,
+        124
+      ]
+    },
+    {
+      "name": "AdventureSession",
+      "discriminator": [
+        76,
+        55,
+        90,
+        248,
+        133,
+        229,
+        144,
+        128
+      ]
+    },
+    {
+      "name": "DungeonMint",
+      "discriminator": [
+        66,
+        4,
+        228,
+        173,
+        28,
+        67,
+        117,
+        115
+      ]
+    },
+    {
+      "name": "PlayerEconomy",
+      "discriminator": [
+        13,
+        211,
+        131,
+        77,
+        0,
+        34,
+        150,
+        149
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidHeroCount",
+      "msg": "hero count must be between 1 and 4"
+    },
+    {
+      "code": 6001,
+      "name": "DuplicateHero",
+      "msg": "duplicate hero provided"
+    },
+    {
+      "code": 6002,
+      "name": "HeroNotOwned",
+      "msg": "hero does not belong to player"
+    },
+    {
+      "code": 6003,
+      "name": "HeroAlreadyActive",
+      "msg": "hero is currently active in a different adventure"
+    },
+    {
+      "code": 6004,
+      "name": "HeroLockOwnerMismatch",
+      "msg": "hero state account belongs to a different player"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidHeroLockAccount",
+      "msg": "hero record is invalid"
+    },
+    {
+      "code": 6006,
+      "name": "HeroUnavailable",
+      "msg": "hero is not available for adventures"
+    },
+    {
+      "code": 6007,
+      "name": "AdventureAlreadyActive",
+      "msg": "adventure already active"
+    },
+    {
+      "code": 6008,
+      "name": "AdventureNotActive",
+      "msg": "adventure is not active"
+    },
+    {
+      "code": 6009,
+      "name": "AdventureOwnerMismatch",
+      "msg": "player mismatch for this adventure session"
+    },
+    {
+      "code": 6010,
+      "name": "DungeonNotReady",
+      "msg": "dungeon is not ready"
+    },
+    {
+      "code": 6011,
+      "name": "DungeonSeedMissing",
+      "msg": "dungeon seed not initialized"
+    },
+    {
+      "code": 6012,
+      "name": "MovementOutOfBounds",
+      "msg": "movement exceeded dungeon bounds"
+    },
+    {
+      "code": 6013,
+      "name": "MovementIntoWall",
+      "msg": "cannot move into a wall tile"
+    },
+    {
+      "code": 6014,
+      "name": "NoPortalAtPosition",
+      "msg": "no portal available at this position"
+    },
+    {
+      "code": 6015,
+      "name": "ResetBlocked",
+      "msg": "reset is blocked while heroes are inside"
+    },
+    {
+      "code": 6016,
+      "name": "HeroIndexOutOfRange",
+      "msg": "hero index out of range"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidValidatorAccount",
+      "msg": "invalid validator account supplied"
+    },
+    {
+      "code": 6018,
+      "name": "Unauthorized",
+      "msg": "caller is not authorized to perform this action"
+    },
+    {
+      "code": 6019,
+      "name": "TooManyItems",
+      "msg": "too many items provided (max 6)"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidItemKey",
+      "msg": "invalid item key"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidItemQuantity",
+      "msg": "invalid item quantity"
+    },
+    {
+      "code": 6022,
+      "name": "ItemStackOverflow",
+      "msg": "item stack overflow"
+    },
+    {
+      "code": 6023,
+      "name": "InventoryFull",
+      "msg": "inventory is full"
+    },
+    {
+      "code": 6024,
+      "name": "ItemNotFound",
+      "msg": "item not found in inventory"
+    },
+    {
+      "code": 6025,
+      "name": "InsufficientItemQuantity",
+      "msg": "insufficient item quantity"
+    },
+    {
+      "code": 6026,
+      "name": "NoChestAtPosition",
+      "msg": "no chest available at this position"
+    },
+    {
+      "code": 6027,
+      "name": "ChestAlreadyOpened",
+      "msg": "chest already opened"
+    },
+    {
+      "code": 6028,
+      "name": "LootNotAvailable",
+      "msg": "selected loot is not available"
+    },
+    {
+      "code": 6029,
+      "name": "DungeonOwnerEconomyMissing",
+      "msg": "dungeon owner economy account missing"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidDungeonAccount",
+      "msg": "dungeon account mismatch"
+    },
+    {
+      "code": 6031,
+      "name": "CombatAlreadyActive",
+      "msg": "combat encounter already active"
+    },
+    {
+      "code": 6032,
+      "name": "NoPendingEncounter",
+      "msg": "no combat encounter available to begin"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidCombatAccount",
+      "msg": "combat account mismatch"
+    },
+    {
+      "code": 6034,
+      "name": "CombatNotActive",
+      "msg": "combat encounter is not active"
+    },
+    {
+      "code": 6035,
+      "name": "MovementBlockedInCombat",
+      "msg": "movement is blocked while heroes are in combat"
+    },
+    {
+      "code": 6036,
+      "name": "NotHeroTurn",
+      "msg": "it is not the selected hero's turn"
+    },
+    {
+      "code": 6037,
+      "name": "HeroNotAlive",
+      "msg": "selected hero cannot act (dead or incapacitated)"
+    },
+    {
+      "code": 6038,
+      "name": "EnemyNotAlive",
+      "msg": "selected enemy is not a valid target"
+    },
+    {
+      "code": 6039,
+      "name": "InsufficientActionPoints",
+      "msg": "insufficient action points for ability"
+    },
+    {
+      "code": 6040,
+      "name": "InvalidTarget",
+      "msg": "invalid target index"
+    },
+    {
+      "code": 6041,
+      "name": "CombatNotResolved",
+      "msg": "combat resolution pending"
+    },
+    {
+      "code": 6042,
+      "name": "ItemNotUsable",
+      "msg": "item cannot be used"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdventureCombat",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "adventure",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "round",
+            "type": "u16"
+          },
+          {
+            "name": "turn_cursor",
+            "type": "u8"
+          },
+          {
+            "name": "torch",
+            "type": "u8"
+          },
+          {
+            "name": "rng_state",
+            "type": "u64"
+          },
+          {
+            "name": "hero_count",
+            "type": "u8"
+          },
+          {
+            "name": "enemy_count",
+            "type": "u8"
+          },
+          {
+            "name": "initiative_len",
+            "type": "u8"
+          },
+          {
+            "name": "initiative",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "InitiativeSlot"
+                  }
+                },
+                8
+              ]
+            }
+          },
+          {
+            "name": "heroes",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "HeroCombatant"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "enemies",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "EnemyCombatant"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "pending_resolution",
+            "type": {
+              "defined": {
+                "name": "CombatResolutionState"
+              }
+            }
+          },
+          {
+            "name": "loot_seed",
+            "type": "u64"
+          },
+          {
+            "name": "last_updated",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdventureSession",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "dungeon_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "seed",
+            "type": "u32"
+          },
+          {
+            "name": "width",
+            "type": "u16"
+          },
+          {
+            "name": "height",
+            "type": "u16"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "heroes_inside",
+            "type": "bool"
+          },
+          {
+            "name": "hero_count",
+            "type": "u8"
+          },
+          {
+            "name": "hero_mints",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "hero_snapshots",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "HeroSnapshot"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "party_position",
+            "type": {
+              "defined": {
+                "name": "DungeonPoint"
+              }
+            }
+          },
+          {
+            "name": "item_count",
+            "type": "u8"
+          },
+          {
+            "name": "items",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ItemSlot"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "pending_loot_count",
+            "type": "u8"
+          },
+          {
+            "name": "pending_loot_source",
+            "type": "u8"
+          },
+          {
+            "name": "pending_loot",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "ItemSlot"
+                  }
+                },
+                6
+              ]
+            }
+          },
+          {
+            "name": "delegate",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "grid",
+            "type": "bytes"
+          },
+          {
+            "name": "rooms",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DungeonRoom"
+                }
+              }
+            }
+          },
+          {
+            "name": "doors",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DungeonPoint"
+                }
+              }
+            }
+          },
+          {
+            "name": "chests",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DungeonPoint"
+                }
+              }
+            }
+          },
+          {
+            "name": "portals",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "DungeonPoint"
+                }
+              }
+            }
+          },
+          {
+            "name": "opened_chests",
+            "type": "bytes"
+          },
+          {
+            "name": "used_portals",
+            "type": "bytes"
+          },
+          {
+            "name": "last_exit_portal",
+            "type": "u8"
+          },
+          {
+            "name": "last_exit_position",
+            "type": {
+              "defined": {
+                "name": "DungeonPoint"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_started_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_reset_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_crew_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "last_crew_count",
+            "type": "u8"
+          },
+          {
+            "name": "last_crew",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "torch",
+            "type": "u8"
+          },
+          {
+            "name": "in_combat",
+            "type": "bool"
+          },
+          {
+            "name": "combat_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_encounter_seed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CombatInstruction",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hero_index",
+            "type": "u8"
+          },
+          {
+            "name": "action",
+            "type": {
+              "defined": {
+                "name": "HeroActionKind"
+              }
+            }
+          },
+          {
+            "name": "target",
+            "type": {
+              "defined": {
+                "name": "TargetSelector"
+              }
+            }
+          },
+          {
+            "name": "item_key",
+            "type": {
+              "option": "u8"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CombatResolutionState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Active"
+          },
+          {
+            "name": "Victory"
+          },
+          {
+            "name": "Defeat"
+          },
+          {
+            "name": "Escape"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CombatantKind",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Hero"
+          },
+          {
+            "name": "Enemy"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Direction",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "North"
+          },
+          {
+            "name": "NorthEast"
+          },
+          {
+            "name": "East"
+          },
+          {
+            "name": "SouthEast"
+          },
+          {
+            "name": "South"
+          },
+          {
+            "name": "SouthWest"
+          },
+          {
+            "name": "West"
+          },
+          {
+            "name": "NorthWest"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonMetadata",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonMint",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "DungeonStatus"
+              }
+            }
+          },
+          {
+            "name": "mint_id",
+            "type": "u16"
+          },
+          {
+            "name": "seed",
+            "type": "u32"
+          },
+          {
+            "name": "grid_width",
+            "type": "u16"
+          },
+          {
+            "name": "grid_height",
+            "type": "u16"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "metadata",
+            "type": {
+              "defined": {
+                "name": "DungeonMetadata"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonPoint",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "x",
+            "type": "u16"
+          },
+          {
+            "name": "y",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonRoom",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "x",
+            "type": "u16"
+          },
+          {
+            "name": "y",
+            "type": "u16"
+          },
+          {
+            "name": "w",
+            "type": "u16"
+          },
+          {
+            "name": "h",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonStatus",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Ready"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EnemyCombatant",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "alive",
+            "type": "bool"
+          },
+          {
+            "name": "ap",
+            "type": "u8"
+          },
+          {
+            "name": "hp",
+            "type": "u16"
+          },
+          {
+            "name": "max_hp",
+            "type": "u16"
+          },
+          {
+            "name": "attack",
+            "type": "u16"
+          },
+          {
+            "name": "defense",
+            "type": "u16"
+          },
+          {
+            "name": "magic",
+            "type": "u16"
+          },
+          {
+            "name": "resistance",
+            "type": "u16"
+          },
+          {
+            "name": "speed",
+            "type": "u16"
+          },
+          {
+            "name": "luck",
+            "type": "u16"
+          },
+          {
+            "name": "statuses",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "StatusInstance"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "threat",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroActionKind",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Attack"
+          },
+          {
+            "name": "Skill1"
+          },
+          {
+            "name": "Skill2"
+          },
+          {
+            "name": "Defend"
+          },
+          {
+            "name": "UseItem"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroCombatant",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hero_index",
+            "type": "u8"
+          },
+          {
+            "name": "alive",
+            "type": "bool"
+          },
+          {
+            "name": "ap",
+            "type": "u8"
+          },
+          {
+            "name": "hp",
+            "type": "u16"
+          },
+          {
+            "name": "max_hp",
+            "type": "u16"
+          },
+          {
+            "name": "attack",
+            "type": "u16"
+          },
+          {
+            "name": "defense",
+            "type": "u16"
+          },
+          {
+            "name": "magic",
+            "type": "u16"
+          },
+          {
+            "name": "resistance",
+            "type": "u16"
+          },
+          {
+            "name": "speed",
+            "type": "u16"
+          },
+          {
+            "name": "luck",
+            "type": "u16"
+          },
+          {
+            "name": "stress",
+            "type": "u16"
+          },
+          {
+            "name": "kill_streak",
+            "type": "u8"
+          },
+          {
+            "name": "guard",
+            "type": "bool"
+          },
+          {
+            "name": "statuses",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "StatusInstance"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "pending_xp",
+            "type": "u32"
+          },
+          {
+            "name": "pending_positive_traits",
+            "type": "u8"
+          },
+          {
+            "name": "pending_negative_traits",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HeroSnapshot",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "hero_id",
+            "type": "u64"
+          },
+          {
+            "name": "hero_type",
+            "type": "u8"
+          },
+          {
+            "name": "level",
+            "type": "u8"
+          },
+          {
+            "name": "experience",
+            "type": "u64"
+          },
+          {
+            "name": "max_hp",
+            "type": "u8"
+          },
+          {
+            "name": "current_hp",
+            "type": "u8"
+          },
+          {
+            "name": "attack",
+            "type": "u8"
+          },
+          {
+            "name": "defense",
+            "type": "u8"
+          },
+          {
+            "name": "magic",
+            "type": "u8"
+          },
+          {
+            "name": "resistance",
+            "type": "u8"
+          },
+          {
+            "name": "speed",
+            "type": "u8"
+          },
+          {
+            "name": "luck",
+            "type": "u8"
+          },
+          {
+            "name": "status_effects",
+            "type": "u8"
+          },
+          {
+            "name": "stress",
+            "type": "u16"
+          },
+          {
+            "name": "stress_max",
+            "type": "u16"
+          },
+          {
+            "name": "positive_traits",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          },
+          {
+            "name": "negative_traits",
+            "type": {
+              "array": [
+                "u8",
+                3
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitiativeSlot",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "occupant_kind",
+            "type": {
+              "defined": {
+                "name": "CombatantKind"
+              }
+            }
+          },
+          {
+            "name": "index",
+            "type": "u8"
+          },
+          {
+            "name": "initiative_value",
+            "type": "i16"
+          },
+          {
+            "name": "order",
+            "type": "u8"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "item_key",
+            "type": "u8"
+          },
+          {
+            "name": "quantity",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemSlot",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "item_key",
+            "type": "u8"
+          },
+          {
+            "name": "quantity",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerEconomy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "gold",
+            "type": "u64"
+          },
+          {
+            "name": "last_grant_ts",
+            "type": "i64"
+          },
+          {
+            "name": "items",
+            "type": {
+              "array": [
+                "u16",
+                7
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatusEffect",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Poison"
+          },
+          {
+            "name": "Bleed"
+          },
+          {
+            "name": "Burn"
+          },
+          {
+            "name": "Chill"
+          },
+          {
+            "name": "Guard"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StatusInstance",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "effect",
+            "type": {
+              "defined": {
+                "name": "StatusEffect"
+              }
+            }
+          },
+          {
+            "name": "duration",
+            "type": "u8"
+          },
+          {
+            "name": "stacks",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TargetSelector",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "Ally",
+            "fields": [
+              "u8"
+            ]
+          },
+          {
+            "name": "Enemy",
+            "fields": [
+              "u8"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

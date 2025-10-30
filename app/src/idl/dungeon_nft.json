@@ -1,0 +1,845 @@
+{
+  "address": "3ygmxT7u6AVcU8Qjtv6W5fgRUvvmajb9Vst776EeT2uh",
+  "metadata": {
+    "name": "dungeon_nft",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "callback_mint_dungeon",
+      "discriminator": [
+        29,
+        82,
+        236,
+        242,
+        71,
+        5,
+        33,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "program_identity",
+          "signer": true,
+          "address": "9irBy75QS2BN81FUgXuHcjqceJJRuc9oDkAe8TKVvvAw"
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "dungeon.mint_id",
+                "account": "DungeonMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer"
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize_config",
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "collection_name",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "base_uri",
+          "type": "string"
+        },
+        {
+          "name": "grid_width",
+          "type": "u16"
+        },
+        {
+          "name": "grid_height",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "mint_dungeon",
+      "discriminator": [
+        82,
+        156,
+        80,
+        252,
+        218,
+        167,
+        138,
+        252
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "config.next_mint_id",
+                "account": "DungeonConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true,
+          "address": "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh"
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "mint_dungeon_with_seed",
+      "discriminator": [
+        151,
+        208,
+        181,
+        62,
+        9,
+        87,
+        163,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "address": "AXwYStYVryJuZjNJjHHLPp6eVRc2TuESnW1pCMiUYrwV"
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "config.next_mint_id",
+                "account": "DungeonConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "owner",
+          "type": "pubkey"
+        },
+        {
+          "name": "seed",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "update_config_grid",
+      "discriminator": [
+        6,
+        150,
+        104,
+        5,
+        81,
+        125,
+        227,
+        255
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "grid_width",
+          "type": "u16"
+        },
+        {
+          "name": "grid_height",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "update_config_metadata",
+      "discriminator": [
+        208,
+        92,
+        40,
+        171,
+        151,
+        9,
+        20,
+        171
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "collection_name",
+          "type": "string"
+        },
+        {
+          "name": "symbol",
+          "type": "string"
+        },
+        {
+          "name": "base_uri",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "DungeonConfig",
+      "discriminator": [
+        184,
+        220,
+        216,
+        249,
+        250,
+        211,
+        99,
+        227
+      ]
+    },
+    {
+      "name": "DungeonMint",
+      "discriminator": [
+        66,
+        4,
+        228,
+        173,
+        28,
+        67,
+        117,
+        115
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ConfigGridUpdated",
+      "discriminator": [
+        79,
+        22,
+        93,
+        208,
+        138,
+        115,
+        138,
+        174
+      ]
+    },
+    {
+      "name": "ConfigInitialized",
+      "discriminator": [
+        181,
+        49,
+        200,
+        156,
+        19,
+        167,
+        178,
+        91
+      ]
+    },
+    {
+      "name": "ConfigMetadataUpdated",
+      "discriminator": [
+        58,
+        74,
+        112,
+        75,
+        202,
+        25,
+        41,
+        243
+      ]
+    },
+    {
+      "name": "DungeonMintRequested",
+      "discriminator": [
+        29,
+        96,
+        195,
+        54,
+        189,
+        148,
+        43,
+        2
+      ]
+    },
+    {
+      "name": "DungeonMintSettled",
+      "discriminator": [
+        206,
+        108,
+        188,
+        202,
+        89,
+        50,
+        223,
+        138
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidGrid",
+      "msg": "Unable to fit dungeon data in configured grid"
+    },
+    {
+      "code": 6001,
+      "name": "GridTooLarge",
+      "msg": "Grid dimensions too large for account space"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidCollectionName",
+      "msg": "Collection name is invalid"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidSymbol",
+      "msg": "Symbol is invalid"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidUri",
+      "msg": "Base URI is invalid"
+    },
+    {
+      "code": 6005,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    },
+    {
+      "code": 6006,
+      "name": "MaxSupplyReached",
+      "msg": "Max supply reached"
+    },
+    {
+      "code": 6007,
+      "name": "MathOverflow",
+      "msg": "Math overflow"
+    },
+    {
+      "code": 6008,
+      "name": "MintAlreadySettled",
+      "msg": "Dungeon already settled"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidRandomness",
+      "msg": "Invalid randomness payload"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidConfigReference",
+      "msg": "Invalid configuration reference"
+    },
+    {
+      "code": 6011,
+      "name": "GridImmutableAfterMint",
+      "msg": "Grid size cannot change after minting begins"
+    },
+    {
+      "code": 6012,
+      "name": "UnauthorizedSeedAuthority",
+      "msg": "Seeded mint authority mismatch"
+    }
+  ],
+  "types": [
+    {
+      "name": "ConfigGridUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "grid_width",
+            "type": "u16"
+          },
+          {
+            "name": "grid_height",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "grid_width",
+            "type": "u16"
+          },
+          {
+            "name": "grid_height",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigMetadataUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "max_supply",
+            "type": "u16"
+          },
+          {
+            "name": "next_mint_id",
+            "type": "u16"
+          },
+          {
+            "name": "completed_mints",
+            "type": "u16"
+          },
+          {
+            "name": "grid_width",
+            "type": "u16"
+          },
+          {
+            "name": "grid_height",
+            "type": "u16"
+          },
+          {
+            "name": "collection_name",
+            "type": "string"
+          },
+          {
+            "name": "collection_symbol",
+            "type": "string"
+          },
+          {
+            "name": "base_uri",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonMetadata",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonMint",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "DungeonStatus"
+              }
+            }
+          },
+          {
+            "name": "mint_id",
+            "type": "u16"
+          },
+          {
+            "name": "seed",
+            "type": "u32"
+          },
+          {
+            "name": "grid_width",
+            "type": "u16"
+          },
+          {
+            "name": "grid_height",
+            "type": "u16"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "metadata",
+            "type": {
+              "defined": {
+                "name": "DungeonMetadata"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonMintRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "dungeon",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint_id",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonMintSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "dungeon",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint_id",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonStatus",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Ready"
+          }
+        ]
+      }
+    }
+  ]
+}

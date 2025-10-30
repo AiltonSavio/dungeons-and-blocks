@@ -16,7 +16,7 @@ import {
 } from "@solana/web3.js";
 import { Buffer } from "buffer";
 
-import dungeonIdl from "../../../target/idl/dungeon_nft.json";
+import dungeonIdl from "../idl/dungeon_nft.json";
 import type { DungeonNft } from "../../../target/types/dungeon_nft";
 
 export const DUNGEON_NFT_PROGRAM_ID = new PublicKey(dungeonIdl.address);

@@ -11,7 +11,7 @@ import {
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
-import adventureIdl from "../../../target/idl/adventure_engine.json";
+import adventureIdl from "../idl/adventure_engine.json";
 import type { AdventureEngine } from "../../../target/types/adventure_engine";
 import { TRAIT_NONE } from "./traitCatalog";
 export { TRAIT_NONE } from "./traitCatalog";
