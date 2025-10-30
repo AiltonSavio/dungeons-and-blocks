@@ -17,7 +17,7 @@ import {
 import { Buffer } from "buffer";
 
 import dungeonIdl from "../idl/dungeon_nft.json";
-import type { DungeonNft } from "../../../target/types/dungeon_nft";
+import type { DungeonNft } from "../types/dungeon_nft";
 
 export const DUNGEON_NFT_PROGRAM_ID = new PublicKey(dungeonIdl.address);
 
