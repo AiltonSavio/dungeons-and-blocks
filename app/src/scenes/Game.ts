@@ -251,6 +251,22 @@ export default class Game extends Phaser.Scene {
   private readonly minTPS = 0.4;
   private readonly maxTPS = 2.2;
 
+  // Camera mask-based fog
+  private fogMaskG?: Phaser.GameObjects.Image;
+  private fogCamMask?: Phaser.Display.Masks.BitmapMask;
+  private fogEnabled = true;
+
+  // Torch / fog UI
+  private torchPct: number = 100; // 0..100
+  private lastTorchPct: number = -1;
+  private torchHud?: {
+    container: Phaser.GameObjects.Container;
+    bg: Phaser.GameObjects.Rectangle;
+    fill: Phaser.GameObjects.Rectangle;
+    label: Phaser.GameObjects.Text;
+  };
+  private tintOverlay?: Phaser.GameObjects.Rectangle;
+
   private get leader(): PartyMember | undefined {
     return this.party[0];
   }
@@ -410,6 +426,9 @@ export default class Game extends Phaser.Scene {
     // Build dungeon layout
     if (adventureAccount) {
       this.applyAdventureSession(adventureAccount);
+      if (adventureAccount && Number.isFinite(adventureAccount.torch)) {
+        this.setTorchPct(adventureAccount.torch);
+      }
     } else {
       this.buildFallbackDungeon();
     }
@@ -529,6 +548,8 @@ export default class Game extends Phaser.Scene {
     this.uiCam.setZoom(1);
     this.uiCam.ignore(this.worldLayer.getChildren());
 
+    this.buildTorchHud();
+
     // Resize handling
     this.scale.on("resize", () => {
       this.updateCameraZoom();
@@ -536,6 +557,9 @@ export default class Game extends Phaser.Scene {
       this.minimap.handleResize(this.scale.width, this.scale.height);
       this.positionInventoryHud();
       this.rebuildHeroHud();
+      this.positionTorchHud();
+      this.applyScreenTintForTorch(this.torchPct);
+      this.updateCameraFogUsingTorch();
       this.encounterPrompt?.handleResize(this.scale.width, this.scale.height);
     });
 
@@ -543,11 +567,19 @@ export default class Game extends Phaser.Scene {
     this.sceneReady = true;
     this.rebuildHeroHud();
 
+    this.initCameraFog();
+
     await this.resumeCombatIfActive();
   }
 
   update(_time: number, deltaMs: number): void {
     if (!this.sceneReady) return;
+
+    const currentPct = this.adventureSession?.torch;
+    if (Number.isFinite(currentPct) && currentPct !== this.lastTorchPct) {
+      this.lastTorchPct = currentPct as number;
+      this.setTorchPct(this.lastTorchPct);
+    }
 
     const dt = Math.min(deltaMs, 50) / 1000;
 
@@ -561,11 +593,13 @@ export default class Game extends Phaser.Scene {
     // Block movement if:
     // 1. Near interactable and queue is not empty
     // 2. Portal modal is open
+    // 3. Waiting for combat to start
     const blockMovement =
       (this.isNearInteractable && this.movementQueue.length > 0) ||
       !!this.portalModalOverlay ||
       !!this.chestModal ||
-      this.processingChest;
+      this.processingChest ||
+      this.isWaitingForCombat;
 
     // Input direction
     const dir = new Phaser.Math.Vector2(
@@ -635,6 +669,10 @@ export default class Game extends Phaser.Scene {
         this.dismissedChestIndex = null;
         this.dismissedChestTile = undefined;
       }
+    }
+
+    if (this.sceneReady && this.fogEnabled) {
+      this.updateCameraFog();
     }
 
     // Check chest proximity (but don't open if queue is processing)
@@ -1203,6 +1241,7 @@ export default class Game extends Phaser.Scene {
 
       if (updated) {
         this.adventureSession = updated;
+        if (Number.isFinite(updated.torch)) this.setTorchPct(updated.torch);
         this.rebuildHeroHud();
         this.syncInventoryFromAdventure();
         this.showChestLootModal(updated);
@@ -2952,5 +2991,195 @@ export default class Game extends Phaser.Scene {
   }
   private uiHideItemTooltip() {
     /* no-op for now */
+  }
+
+  // ==================== FOG OF WAR (Camera Mask) ====================
+
+  private initCameraFog() {
+    const key = this.createFogTexture();
+
+    // Add the gradient image as mask source (screen-space)
+    const maskImg = this.add
+      .image(0, 0, key)
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(9999)
+      .setVisible(false);
+
+    this.fogMaskG = maskImg;
+    this.fogCamMask = new Phaser.Display.Masks.BitmapMask(this, maskImg);
+    this.fogCamMask.invertAlpha = false;
+    this.cameras.main.setMask(this.fogCamMask);
+
+    this.updateCameraFog();
+  }
+
+  private updateCameraFog() {
+    this.updateCameraFogUsingTorch();
+  }
+
+  private createFogTexture(): string {
+    const size = 512; // texture resolution (higher = smoother)
+    const rt = this.textures.createCanvas("fogMaskTex", size, size);
+    if (rt) {
+      const ctx = rt.getContext();
+      const grd = ctx.createRadialGradient(
+        size / 2,
+        size / 2,
+        0,
+        size / 2,
+        size / 2,
+        size / 2
+      );
+
+      // White = visible area, Black = hidden (BitmapMask reads alpha)
+      grd.addColorStop(0, "rgba(255,255,255,1)"); // full visible center
+      grd.addColorStop(0.6, "rgba(255,255,255,0.6)"); // fade region
+      grd.addColorStop(1, "rgba(255,255,255,0)"); // transparent edge
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, size, size);
+
+      rt.refresh();
+    }
+    return "fogMaskTex";
+  }
+
+  private buildTorchHud() {
+    // Clean previous
+    this.torchHud?.container.destroy();
+    this.torchHud = undefined;
+
+    const uiW = this.uiCam?.width ?? this.scale.width;
+    const uiH = this.uiCam?.height ?? this.scale.height;
+
+    const barW = Math.max(220, Math.min(420, Math.floor(uiW * 0.35)));
+    const barH = 18;
+
+    const container = this.add.container(uiW / 2, 18);
+    container.setDepth(10_100);
+    this.uiLayer.add(container);
+
+    const bg = this.add
+      .rectangle(0, 0, barW, barH, 0x000000, 0.6)
+      .setOrigin(0.5)
+      .setStrokeStyle(1, 0xffffff, 0.15);
+
+    // Start full; width adjusted in setTorchPct
+    const fill = this.add
+      .rectangle(0, 0, barW - 4, barH - 4, 0xffd54a, 0.95)
+      .setOrigin(0.5);
+
+    const label = this.add
+      .text(0, -barH - 4, "Torch 100%", {
+        fontFamily: "monospace",
+        fontSize: "12px",
+        color: "#e6e6e6",
+        align: "center",
+      })
+      .setOrigin(0.5);
+
+    container.add(bg);
+    container.add(fill);
+    container.add(label);
+
+    this.torchHud = { container, bg, fill, label };
+    this.positionTorchHud(); // place at top-center with safe margin
+    this.setTorchPct(this.torchPct); // sync visuals
+  }
+
+  private positionTorchHud() {
+    if (!this.torchHud) return;
+    const uiW = this.uiCam?.width ?? this.scale.width;
+    const topMargin = 40;
+    this.torchHud.container.setPosition(uiW / 2, topMargin);
+  }
+
+  private setTorchPct(pct: number) {
+    const clamped = Phaser.Math.Clamp(Math.round(pct), 0, 100);
+    this.torchPct = clamped;
+
+    // Update bar
+    if (this.torchHud) {
+      const fullW = (this.torchHud.bg.width ?? 0) - 4; // inner width
+      const newW = Math.max(0, Math.floor((fullW * clamped) / 100));
+      this.torchHud.fill.setDisplaySize(
+        newW,
+        (this.torchHud.bg.height ?? 0) - 4
+      );
+
+      // Color: yellow -> orange -> red
+      // ≥67%: yellow (#FFD54A), 33–66%: orange (#FFA726), ≤32%: red (#EF5350)
+      let color = 0xffd54a;
+      if (clamped <= 66) color = 0xffa726;
+      if (clamped <= 33) color = 0xef5350;
+      this.torchHud.fill.setFillStyle(color, 0.95);
+
+      this.torchHud.label.setText(`Torch ${clamped}%`);
+    }
+
+    // Visibility + tint
+    this.updateCameraFogUsingTorch();
+    this.applyScreenTintForTorch(clamped);
+  }
+
+  private updateCameraFogUsingTorch() {
+    if (!this.fogMaskG) return;
+    const cam = this.cameras.main;
+
+    const cx = cam.width * 0.5;
+    const cy = cam.height * 0.5;
+
+    // Max visibility radius (at 100%)
+    const maxRadius = Math.min(cam.width, cam.height) * 0.6;
+
+    // Minimum radius:
+    // - a bit larger than a tile: 1.5 * tileSize
+    // - but also not absurdly tiny on large screens
+    const minRadiusAbs = Math.min(cam.width, cam.height) * 0.025; // 2.5% of screen
+    const minRadiusScreen = Math.min(cam.width, cam.height) * 0.12;
+    const minRadius = Math.max(minRadiusAbs, minRadiusScreen);
+
+    // Torch stops shrinking under 25%: clamp effective % to [25..100]
+    const effective = Math.max(this.torchPct, 25);
+
+    // Linear map: 25% -> minRadius, 100% -> maxRadius
+    const t = (effective - 25) / (100 - 25); // 0..1
+    const radiusPx = Phaser.Math.Linear(minRadius, maxRadius, t);
+
+    (this.fogMaskG as Phaser.GameObjects.Image)
+      .setPosition(cx, cy)
+      .setDisplaySize(radiusPx * 2, radiusPx * 2); // size == diameter
+  }
+
+  private applyScreenTintForTorch(pct: number) {
+    // Lazy-create overlay
+    if (!this.tintOverlay) {
+      const uiW = this.uiCam?.width ?? this.scale.width;
+      const uiH = this.uiCam?.height ?? this.scale.height;
+      this.tintOverlay = this.add
+        .rectangle(0, 0, uiW, uiH, 0xffa726, 0) // start transparent
+        .setOrigin(0, 0)
+        .setDepth(10_050)
+        .setScrollFactor(0, 0);
+
+      // Only add to uiLayer if it's already available
+      if (this.uiLayer) {
+        this.uiLayer.add(this.tintOverlay);
+      }
+    }
+
+    // Pick color & alpha
+    if (pct > 66) {
+      this.tintOverlay.setFillStyle(0xffa726, 0);
+    } else if (pct > 33) {
+      this.tintOverlay.setFillStyle(0xff8f00, 0.08);
+    } else {
+      this.tintOverlay.setFillStyle(0xb71c1c, 0.12);
+    }
+
+    // Keep overlay sized on resize
+    const uiW = this.uiCam?.width ?? this.scale.width;
+    const uiH = this.uiCam?.height ?? this.scale.height;
+    this.tintOverlay.setSize(uiW, uiH);
   }
 }
